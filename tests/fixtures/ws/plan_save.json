@@ -1,0 +1,193 @@
+{
+  "command": "outglow/plan/save",
+  "request": {
+    "rev": 3,
+    "plan": {
+      "version": 1,
+      "rev": 3,
+      "floor_id": null,
+      "north_deg": 0.0,
+      "view_rotation_deg": 0.0,
+      "background": null,
+      "rooms": [
+        {
+          "id": "living",
+          "name": "Living room",
+          "outline": [
+            [
+              0,
+              0
+            ],
+            [
+              5,
+              0
+            ],
+            [
+              5,
+              4
+            ],
+            [
+              0,
+              4
+            ]
+          ],
+          "colour": "#4e9af1",
+          "area_id": null,
+          "entrance": false
+        },
+        {
+          "id": "hall",
+          "name": "Hall",
+          "outline": [
+            [
+              5,
+              0
+            ],
+            [
+              7,
+              0
+            ],
+            [
+              7,
+              6
+            ],
+            [
+              5,
+              6
+            ]
+          ],
+          "colour": "#f28b30",
+          "area_id": null,
+          "entrance": true
+        },
+        {
+          "id": "office",
+          "name": "Office",
+          "outline": [
+            [
+              2,
+              4
+            ],
+            [
+              5,
+              4
+            ],
+            [
+              5,
+              7
+            ],
+            [
+              2,
+              7
+            ]
+          ],
+          "colour": "#42b883",
+          "area_id": null,
+          "entrance": false
+        }
+      ],
+      "walls": [
+        {
+          "a": [
+            5,
+            0
+          ],
+          "b": [
+            5,
+            4
+          ],
+          "kind": "partition"
+        },
+        {
+          "a": [
+            2,
+            4
+          ],
+          "b": [
+            5,
+            4
+          ],
+          "kind": "brick"
+        },
+        {
+          "a": [
+            5,
+            4
+          ],
+          "b": [
+            5,
+            6
+          ],
+          "kind": "partition"
+        }
+      ],
+      "doors": [
+        {
+          "wall": 0,
+          "at": 0.6,
+          "width": 0.9,
+          "kind": "door"
+        },
+        {
+          "wall": 2,
+          "at": 0.5,
+          "width": 0.8,
+          "kind": "door"
+        }
+      ],
+      "adjacent": [
+        [
+          "living",
+          "hall"
+        ],
+        [
+          "hall",
+          "office"
+        ]
+      ],
+      "bulbs": [
+        {
+          "ieee": "0x0000000000000001",
+          "x": 1.5,
+          "y": 1.5,
+          "height": "ceiling",
+          "room": null
+        },
+        {
+          "ieee": "0x0000000000000002",
+          "x": 3.8,
+          "y": 2.5,
+          "height": "ceiling",
+          "room": null
+        },
+        {
+          "ieee": "0x0000000000000003",
+          "x": 6.0,
+          "y": 3.0,
+          "height": "ceiling",
+          "room": null
+        },
+        {
+          "ieee": "0x0000000000000004",
+          "x": 3.5,
+          "y": 5.5,
+          "height": "ceiling",
+          "room": null
+        }
+      ],
+      "excluded_directions": [],
+      "retired_rooms": []
+    }
+  },
+  "response": {
+    "rev": 4,
+    "warnings": [],
+    "background": null
+  },
+  "errors": [
+    {
+      "code": "rev_conflict",
+      "message": "The plan was saved elsewhere (rev 4)"
+    }
+  ]
+}

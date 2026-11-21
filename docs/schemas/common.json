@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "common.json",
+  "title": "Common",
+  "$defs": {
+    "Ieee": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{16}$",
+      "description": "IEEE address as Zigbee2MQTT writes it, lower case"
+    },
+    "RoomId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$",
+      "description": "Stable room id of the plan"
+    },
+    "Timestamp": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Seconds since the Unix epoch (server clock)"
+    },
+    "Point": {
+      "type": "array",
+      "prefixItems": [{"type": "number"}, {"type": "number"}],
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "x, y in metres; x to the right, y down"
+    },
+    "Probability": {"type": "number", "minimum": 0, "maximum": 1},
+    "Scalar": {"type": ["string", "number", "boolean", "null"]},
+    "Empty": {"type": "object", "additionalProperties": false}
+  }
+}

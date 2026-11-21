@@ -1,0 +1,22 @@
+{
+  "command": "outglow/model/snapshot/delete",
+  "request": {
+    "snapshot_id": "m-0005"
+  },
+  "response": {
+    "snapshots": [
+      {
+        "snapshot_id": "m-0006",
+        "t": 1799992808.0,
+        "reason": "before_session",
+        "model_version": 6
+      }
+    ]
+  },
+  "errors": [
+    {
+      "code": "busy",
+      "message": "A rollback to this snapshot is running"
+    }
+  ]
+}

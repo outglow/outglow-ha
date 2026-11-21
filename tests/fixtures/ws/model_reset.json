@@ -1,0 +1,10 @@
+{
+  "command": "outglow/model/reset",
+  "request": {
+    "room": "living"
+  },
+  "response": {
+    "model_version": 8,
+    "snapshot_id": "m-0008"
+  }
+}

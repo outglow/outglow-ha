@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frame.json",
+  "title": "Frame",
+  "description": "Engine output of one tick (architecture.md 4.3)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["t", "status", "model_version", "directions", "pairs", "rooms", "veto", "gates", "trail", "illustrative_xy"],
+  "properties": {
+    "t": {"$ref": "common.json#/$defs/Timestamp"},
+    "status": {"$ref": "#/$defs/Status"},
+    "model_version": {"type": "integer", "minimum": 0},
+    "directions": {"type": "array", "items": {"$ref": "#/$defs/DirectionFrame"}},
+    "pairs": {"type": "array", "items": {"$ref": "#/$defs/PairFrame"}},
+    "rooms": {"type": "object", "propertyNames": {"$ref": "common.json#/$defs/RoomId"}, "additionalProperties": {"$ref": "#/$defs/RoomFrame"}},
+    "veto": {"oneOf": [{"$ref": "#/$defs/Veto"}, {"type": "null"}]},
+    "gates": {"type": "object", "propertyNames": {"$ref": "common.json#/$defs/Ieee"}, "additionalProperties": {"$ref": "#/$defs/Gate"}},
+    "trail": {"type": "array", "items": {"$ref": "#/$defs/TrailStep"}, "description": "Last room changes, oldest first"},
+    "illustrative_xy": {"type": "object", "propertyNames": {"$ref": "common.json#/$defs/RoomId"}, "additionalProperties": {"$ref": "common.json#/$defs/Point"}, "description": "Drawing only, not a position estimate"}
+  },
+  "$defs": {
+    "Status": {"enum": ["learning", "ready", "degraded", "paused"]},
+    "DirectionState": {"enum": ["quiet", "exceed", "quiet_censored", "none"]},
+    "DirectionFlag": {"enum": ["one_sided", "single_direction", "frozen", "weak", "excluded", "asymmetric_noisy", "blanked", "vetoed"]},
+    "Gate": {"enum": ["open", "closed", "offline"]},
+    "Coverage": {"enum": ["good", "weak", "none"]},
+    "PairObservation": {"enum": [0, 1, 2], "description": "0 quiet, 1 one-sided, 2 both directions"},
+    "TrailStep": {"type": "array", "prefixItems": [{"$ref": "common.json#/$defs/RoomId"}, {"$ref": "common.json#/$defs/Timestamp"}], "minItems": 2, "maxItems": 2},
+    "PairKey": {"type": "array", "prefixItems": [{"$ref": "common.json#/$defs/Ieee"}, {"$ref": "common.json#/$defs/Ieee"}], "minItems": 2, "maxItems": 2},
+    "DirectionFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rx", "tx", "level", "z", "state", "flags"],
+      "properties": {
+        "rx": {"$ref": "common.json#/$defs/Ieee"},
+        "tx": {"$ref": "common.json#/$defs/Ieee"},
+        "level": {"type": ["integer", "null"], "minimum": 0, "maximum": 255},
+        "z": {"type": ["number", "null"]},
+        "state": {"$ref": "#/$defs/DirectionState"},
+        "flags": {"type": "array", "items": {"$ref": "#/$defs/DirectionFlag"}}
+      }
+    },
+    "PairFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a", "b", "obs", "weight"],
+      "properties": {
+        "a": {"$ref": "common.json#/$defs/Ieee"},
+        "b": {"$ref": "common.json#/$defs/Ieee"},
+        "obs": {"oneOf": [{"$ref": "#/$defs/PairObservation"}, {"type": "null"}]},
+        "weight": {"type": "number", "minimum": 0}
+      }
+    },
+    "RoomFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["p", "motion", "occupied", "since", "coverage", "top_pairs"],
+      "properties": {
+        "p": {"$ref": "common.json#/$defs/Probability"},
+        "motion": {"type": "boolean"},
+        "occupied": {"type": "boolean", "description": "Motion now or within the hold time"},
+        "since": {"oneOf": [{"$ref": "common.json#/$defs/Timestamp"}, {"type": "null"}]},
+        "coverage": {"$ref": "#/$defs/Coverage"},
+        "top_pairs": {"type": "array", "items": {"$ref": "#/$defs/PairKey"}, "maxItems": 3}
+      }
+    },
+    "Veto": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "rx"],
+      "properties": {
+        "kind": {"enum": ["common", "receiver"]},
+        "rx": {"oneOf": [{"$ref": "common.json#/$defs/Ieee"}, {"type": "null"}]}
+      }
+    },
+    "FrameDelta": {
+      "type": "object",
+      "description": "Changes since the previous message. Arrays carry only changed entries (directions keyed by rx and tx, pairs by a and b); objects only changed keys. Anything removed makes the backend send a full frame instead.",
+      "additionalProperties": false,
+      "required": ["t"],
+      "properties": {
+        "t": {"$ref": "common.json#/$defs/Timestamp"},
+        "status": {"$ref": "#/$defs/Status"},
+        "model_version": {"type": "integer", "minimum": 0},
+        "directions": {"type": "array", "items": {"$ref": "#/$defs/DirectionFrame"}},
+        "pairs": {"type": "array", "items": {"$ref": "#/$defs/PairFrame"}},
+        "rooms": {"type": "object", "additionalProperties": {"$ref": "#/$defs/RoomFrame"}},
+        "veto": {"oneOf": [{"$ref": "#/$defs/Veto"}, {"type": "null"}]},
+        "gates": {"type": "object", "additionalProperties": {"$ref": "#/$defs/Gate"}},
+        "trail": {"type": "array", "items": {"$ref": "#/$defs/TrailStep"}, "description": "Whole trail when it changed"},
+        "illustrative_xy": {"type": "object", "additionalProperties": {"$ref": "common.json#/$defs/Point"}, "description": "Whole map when it changed"}
+      }
+    },
+    "LiveMessage": {
+      "description": "Event of outglow/live/subscribe: a full frame first, then deltas",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "frame"],
+          "properties": {"kind": {"const": "full"}, "frame": {"$ref": "#"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "delta"],
+          "properties": {"kind": {"const": "delta"}, "delta": {"$ref": "#/$defs/FrameDelta"}}
+        }
+      ]
+    },
+    "LiveSubscribeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rate_hz"],
+      "properties": {"rate_hz": {"type": "number", "exclusiveMinimum": 0, "maximum": 4}}
+    }
+  }
+}

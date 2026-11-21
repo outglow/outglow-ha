@@ -1,0 +1,26 @@
+{
+  "command": "outglow/session/start",
+  "request": {
+    "name": "Evening",
+    "raise_rate": false
+  },
+  "response": {
+    "session_id": "s-0001",
+    "name": "Evening",
+    "started": 1799999888.0,
+    "state": "running",
+    "raised_rate": false,
+    "steps": [],
+    "live_feedback": {
+      "pairs_reacting": 0,
+      "veto": false
+    },
+    "summary": null
+  },
+  "errors": [
+    {
+      "code": "busy",
+      "message": "A session is already running"
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "quality.json",
+  "title": "QualityReport",
+  "description": "Quality over the last days (architecture.md 5.9). Texts are built by the frontend from kind and numbers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["t", "days", "empty_house_hours", "network_frames_per_s", "rooms", "directions", "pairs", "recommendations"],
+  "properties": {
+    "t": {"$ref": "common.json#/$defs/Timestamp"},
+    "days": {"type": "integer", "minimum": 1, "maximum": 30},
+    "empty_house_hours": {"type": "number", "minimum": 0},
+    "network_frames_per_s": {"type": "number", "minimum": 0, "description": "Estimated activity report frames per second in the whole network"},
+    "rooms": {"type": "array", "items": {"$ref": "#/$defs/RoomQuality"}},
+    "directions": {"type": "array", "items": {"$ref": "#/$defs/DirectionQuality"}},
+    "pairs": {"type": "array", "items": {"$ref": "#/$defs/PairQuality"}},
+    "recommendations": {"type": "array", "items": {"$ref": "#/$defs/Recommendation"}}
+  },
+  "$defs": {
+    "RoomQuality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room", "false_alarms_per_day", "entry_detection", "latency_median_s", "latency_p90_s", "coverage", "coverage_class", "vetoes"],
+      "properties": {
+        "room": {"$ref": "common.json#/$defs/RoomId"},
+        "false_alarms_per_day": {"type": ["number", "null"], "minimum": 0},
+        "entry_detection": {"oneOf": [{"$ref": "common.json#/$defs/Probability"}, {"type": "null"}]},
+        "latency_median_s": {"type": ["number", "null"], "minimum": 0},
+        "latency_p90_s": {"type": ["number", "null"], "minimum": 0},
+        "coverage": {"type": "number", "minimum": 0, "description": "Sum of pair information for the room, nats"},
+        "coverage_class": {"$ref": "frame.json#/$defs/Coverage"},
+        "vetoes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "DirectionQuality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rx", "tx", "exceed_per_h", "exceed_per_day", "asymmetry", "frozen_frac", "signal_dbm", "gate_open_frac", "theta", "flags"],
+      "properties": {
+        "rx": {"$ref": "common.json#/$defs/Ieee"},
+        "tx": {"$ref": "common.json#/$defs/Ieee"},
+        "exceed_per_h": {"type": "number", "minimum": 0},
+        "exceed_per_day": {"type": "number", "minimum": 0},
+        "asymmetry": {"type": ["number", "null"], "description": "Background exceed rate over the reverse direction's"},
+        "frozen_frac": {"$ref": "common.json#/$defs/Probability"},
+        "signal_dbm": {"type": ["integer", "null"]},
+        "gate_open_frac": {"$ref": "common.json#/$defs/Probability"},
+        "theta": {"type": "object", "additionalProperties": {"$ref": "common.json#/$defs/Probability"}, "description": "Learnt sensitivity to motion per room"},
+        "flags": {"type": "array", "items": {"$ref": "frame.json#/$defs/DirectionFlag"}}
+      }
+    },
+    "PairQuality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a", "b", "information"],
+      "properties": {
+        "a": {"$ref": "common.json#/$defs/Ieee"},
+        "b": {"$ref": "common.json#/$defs/Ieee"},
+        "information": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0}, "description": "KL divergence per room, nats"}
+      }
+    },
+    "RecommendationKind": {"enum": ["skip_direction", "raise_sensitivity", "weak_coverage", "more_empty_house", "frozen_direction", "no_bulbs"]},
+    "RecommendationAction": {"enum": ["skip_direction", "bulb_write", "wizard", "show_candidates", "none"]},
+    "Recommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "severity", "action", "room", "rx", "tx", "bulb", "numbers", "candidates"],
+      "properties": {
+        "id": {"type": "string", "description": "Stable while the cause lasts, for dismissing"},
+        "kind": {"$ref": "#/$defs/RecommendationKind"},
+        "severity": {"enum": ["info", "warning"]},
+        "action": {"$ref": "#/$defs/RecommendationAction"},
+        "room": {"oneOf": [{"$ref": "common.json#/$defs/RoomId"}, {"type": "null"}]},
+        "rx": {"oneOf": [{"$ref": "common.json#/$defs/Ieee"}, {"type": "null"}]},
+        "tx": {"oneOf": [{"$ref": "common.json#/$defs/Ieee"}, {"type": "null"}]},
+        "bulb": {"oneOf": [{"$ref": "common.json#/$defs/Ieee"}, {"type": "null"}]},
+        "numbers": {"type": "object", "additionalProperties": {"type": "number"}, "description": "Values the text quotes, e.g. per_h, pairs, open_frac, hours"},
+        "candidates": {"type": "array", "items": {"$ref": "common.json#/$defs/Point"}, "description": "Where another bulb would help (estimate)"}
+      }
+    },
+    "QualityRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["days"],
+      "properties": {"days": {"type": "integer", "minimum": 1, "maximum": 30}}
+    }
+  }
+}

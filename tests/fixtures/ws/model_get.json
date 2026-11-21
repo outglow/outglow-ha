@@ -1,0 +1,42 @@
+{
+  "command": "outglow/model/get",
+  "request": {},
+  "response": {
+    "model_version": 6,
+    "updated": 1799913608.0,
+    "learning": true,
+    "empty_house_hours": 31.5,
+    "labels": {
+      "wizard": 412,
+      "empty_house": 3600
+    },
+    "pending": {
+      "pending_id": "p-0007",
+      "created": 1799999948.0,
+      "labels": {
+        "wizard": 180,
+        "feedback": 2
+      },
+      "rooms": [
+        {
+          "room": "hall",
+          "a_on_before": 0.9,
+          "a_on_after": 0.85,
+          "detection_before": 0.71,
+          "detection_after": 0.86,
+          "false_per_day_before": 0.6,
+          "false_per_day_after": 0.9
+        },
+        {
+          "room": "office",
+          "a_on_before": 0.9,
+          "a_on_after": 0.9,
+          "detection_before": null,
+          "detection_after": 0.61,
+          "false_per_day_before": null,
+          "false_per_day_after": 0.2
+        }
+      ]
+    }
+  }
+}

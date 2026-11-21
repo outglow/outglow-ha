@@ -1,0 +1,57 @@
+{
+  "command": "outglow/bulbs",
+  "request": {},
+  "response": {
+    "bulbs": [
+      {
+        "ieee": "0x0000000000000001",
+        "name": "Test/Living 1",
+        "model": "outglow-tw",
+        "available": true,
+        "sensing": true,
+        "probes": 5,
+        "activity_rate": 2,
+        "sensitivity": 40,
+        "auto_calibration": false,
+        "light_entity": "light.test_living_1",
+        "area_id": "living",
+        "gate_duty_24h": 0.31,
+        "lines": [
+          {
+            "tx": "0x0000000000000002",
+            "signal": -61,
+            "frozen": false,
+            "weak": false
+          },
+          {
+            "tx": "0x0000000000000003",
+            "signal": -72,
+            "frozen": false,
+            "weak": false
+          },
+          {
+            "tx": "0x0000000000000004",
+            "signal": -89,
+            "frozen": true,
+            "weak": true
+          }
+        ]
+      },
+      {
+        "ieee": "0x0000000000000004",
+        "name": "Office",
+        "model": "outglow-dimm",
+        "available": false,
+        "sensing": true,
+        "probes": null,
+        "activity_rate": null,
+        "sensitivity": null,
+        "auto_calibration": null,
+        "light_entity": null,
+        "area_id": null,
+        "gate_duty_24h": null,
+        "lines": []
+      }
+    ]
+  }
+}

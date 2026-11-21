@@ -1,0 +1,175 @@
+{
+  "command": "outglow/quality",
+  "request": {
+    "days": 7
+  },
+  "response": {
+    "t": 1800000008.0,
+    "days": 7,
+    "empty_house_hours": 31.5,
+    "network_frames_per_s": 4.2,
+    "rooms": [
+      {
+        "room": "hall",
+        "false_alarms_per_day": 0.4,
+        "entry_detection": 0.88,
+        "latency_median_s": 1.6,
+        "latency_p90_s": 3.1,
+        "coverage": 1.4,
+        "coverage_class": "good",
+        "vetoes": 2
+      },
+      {
+        "room": "living",
+        "false_alarms_per_day": 2.1,
+        "entry_detection": 0.93,
+        "latency_median_s": 1.1,
+        "latency_p90_s": 2.0,
+        "coverage": 2.6,
+        "coverage_class": "good",
+        "vetoes": 5
+      },
+      {
+        "room": "office",
+        "false_alarms_per_day": null,
+        "entry_detection": null,
+        "latency_median_s": null,
+        "latency_p90_s": null,
+        "coverage": 0.5,
+        "coverage_class": "weak",
+        "vetoes": 0
+      }
+    ],
+    "directions": [
+      {
+        "rx": "0x0000000000000001",
+        "tx": "0x0000000000000002",
+        "exceed_per_h": 290.0,
+        "exceed_per_day": 6960.0,
+        "asymmetry": 4.0,
+        "frozen_frac": 0.0,
+        "signal_dbm": -61,
+        "gate_open_frac": 0.4,
+        "theta": {
+          "living": 0.2,
+          "hall": 0.05
+        },
+        "flags": [
+          "asymmetric_noisy"
+        ]
+      },
+      {
+        "rx": "0x0000000000000003",
+        "tx": "0x0000000000000004",
+        "exceed_per_h": 0.0,
+        "exceed_per_day": 0.0,
+        "asymmetry": null,
+        "frozen_frac": 0.97,
+        "signal_dbm": -89,
+        "gate_open_frac": 0.02,
+        "theta": {},
+        "flags": [
+          "frozen",
+          "weak"
+        ]
+      }
+    ],
+    "pairs": [
+      {
+        "a": "0x0000000000000001",
+        "b": "0x0000000000000002",
+        "information": {
+          "living": 0.4,
+          "hall": 0.1
+        }
+      },
+      {
+        "a": "0x0000000000000003",
+        "b": "0x0000000000000004",
+        "information": {
+          "hall": 0.6,
+          "office": 0.5
+        }
+      }
+    ],
+    "recommendations": [
+      {
+        "id": "skip:0x0000000000000001:0x0000000000000002",
+        "kind": "skip_direction",
+        "severity": "warning",
+        "action": "skip_direction",
+        "room": null,
+        "rx": "0x0000000000000001",
+        "tx": "0x0000000000000002",
+        "bulb": null,
+        "numbers": {
+          "per_h": 290.0,
+          "asymmetry": 4.0
+        },
+        "candidates": []
+      },
+      {
+        "id": "raise:0x0000000000000004",
+        "kind": "raise_sensitivity",
+        "severity": "warning",
+        "action": "bulb_write",
+        "room": null,
+        "rx": null,
+        "tx": null,
+        "bulb": "0x0000000000000004",
+        "numbers": {
+          "open_frac": 0.02,
+          "suggested": 50.0
+        },
+        "candidates": []
+      },
+      {
+        "id": "coverage:office",
+        "kind": "weak_coverage",
+        "severity": "info",
+        "action": "show_candidates",
+        "room": "office",
+        "rx": null,
+        "tx": null,
+        "bulb": null,
+        "numbers": {
+          "pairs": 2.0
+        },
+        "candidates": [
+          [
+            3.0,
+            6.0
+          ]
+        ]
+      },
+      {
+        "id": "empty",
+        "kind": "more_empty_house",
+        "severity": "info",
+        "action": "wizard",
+        "room": null,
+        "rx": null,
+        "tx": null,
+        "bulb": null,
+        "numbers": {
+          "hours": 0.7
+        },
+        "candidates": []
+      },
+      {
+        "id": "frozen:0x0000000000000003:0x0000000000000004",
+        "kind": "frozen_direction",
+        "severity": "info",
+        "action": "none",
+        "room": null,
+        "rx": "0x0000000000000003",
+        "tx": "0x0000000000000004",
+        "bulb": null,
+        "numbers": {
+          "signal_dbm": -89.0
+        },
+        "candidates": []
+      }
+    ]
+  }
+}

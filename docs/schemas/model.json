@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "model.json",
+  "title": "ModelSummary",
+  "description": "The active model and a proposal waiting for apply (D4); no raw data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["model_version", "updated", "learning", "empty_house_hours", "labels", "pending"],
+  "properties": {
+    "model_version": {"type": "integer", "minimum": 0},
+    "updated": {"oneOf": [{"$ref": "common.json#/$defs/Timestamp"}, {"type": "null"}]},
+    "learning": {"type": "boolean"},
+    "empty_house_hours": {"type": "number", "minimum": 0},
+    "labels": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}, "description": "Applied labels by source"},
+    "pending": {"oneOf": [{"$ref": "#/$defs/PendingModel"}, {"type": "null"}]}
+  },
+  "$defs": {
+    "RoomChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room", "a_on_before", "a_on_after", "detection_before", "detection_after", "false_per_day_before", "false_per_day_after"],
+      "properties": {
+        "room": {"$ref": "common.json#/$defs/RoomId"},
+        "a_on_before": {"$ref": "common.json#/$defs/Probability"},
+        "a_on_after": {"$ref": "common.json#/$defs/Probability"},
+        "detection_before": {"oneOf": [{"$ref": "common.json#/$defs/Probability"}, {"type": "null"}]},
+        "detection_after": {"oneOf": [{"$ref": "common.json#/$defs/Probability"}, {"type": "null"}]},
+        "false_per_day_before": {"type": ["number", "null"], "minimum": 0},
+        "false_per_day_after": {"type": ["number", "null"], "minimum": 0}
+      }
+    },
+    "PendingModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pending_id", "created", "labels", "rooms"],
+      "properties": {
+        "pending_id": {"type": "string"},
+        "created": {"$ref": "common.json#/$defs/Timestamp"},
+        "labels": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}, "description": "New labels by source"},
+        "rooms": {"type": "array", "items": {"$ref": "#/$defs/RoomChange"}}
+      }
+    },
+    "Snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot_id", "t", "reason", "model_version"],
+      "properties": {
+        "snapshot_id": {"type": "string"},
+        "t": {"$ref": "common.json#/$defs/Timestamp"},
+        "reason": {"enum": ["daily", "before_session", "before_apply", "before_reset", "before_rollback"]},
+        "model_version": {"type": "integer", "minimum": 0}
+      }
+    },
+    "SnapshotList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshots"],
+      "properties": {"snapshots": {"type": "array", "items": {"$ref": "#/$defs/Snapshot"}}}
+    },
+    "PendingRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pending_id"],
+      "properties": {"pending_id": {"type": "string"}}
+    },
+    "ApplyRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pending_id"],
+      "properties": {
+        "pending_id": {"type": "string"},
+        "mode": {"$ref": "settings.json#/$defs/Mode", "description": "Also switch detection to this mode; only that field of the current settings changes"}
+      }
+    },
+    "RollbackRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot_id"],
+      "properties": {"snapshot_id": {"type": "string"}}
+    },
+    "SnapshotDeleteRequest": {
+      "type": "object",
+      "description": "Exactly one of snapshot_id or all: true. all removes every snapshot; the active model is not a snapshot and stays. The target of a running rollback and a snapshot taken by an operation still running (rollback, apply, reset, session start, calibration, plan save) cannot be removed (busy; all keeps them)",
+      "additionalProperties": false,
+      "properties": {
+        "snapshot_id": {"type": "string"},
+        "all": {"type": "boolean"}
+      }
+    },
+    "ResetRequest": {
+      "type": "object",
+      "description": "Forgets what the model learnt for the whole home (room null or missing) or for one room. Plan and settings stay; a before_reset snapshot is taken first",
+      "additionalProperties": false,
+      "properties": {
+        "room": {"oneOf": [{"$ref": "common.json#/$defs/RoomId"}, {"type": "null"}]}
+      }
+    },
+    "ModelChangeResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_version", "snapshot_id"],
+      "properties": {
+        "model_version": {"type": "integer", "minimum": 0},
+        "snapshot_id": {"type": ["string", "null"], "description": "Snapshot taken before the change"}
+      }
+    }
+  }
+}

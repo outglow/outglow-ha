@@ -1,0 +1,17 @@
+{
+  "command": "outglow/model/apply",
+  "request": {
+    "pending_id": "p-0007",
+    "mode": "bayes"
+  },
+  "response": {
+    "model_version": 7,
+    "snapshot_id": "m-0007"
+  },
+  "errors": [
+    {
+      "code": "not_found",
+      "message": "No such proposal"
+    }
+  ]
+}

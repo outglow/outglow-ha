@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Outglow card mock</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --ha-font-family-body: Roboto, system-ui, -apple-system, "Segoe UI", sans-serif;
+        --primary-color: #03a9f4;
+        --rgb-primary-color: 3, 169, 244;
+        --primary-background-color: #fafafa;
+        --card-background-color: #ffffff;
+        --app-header-background-color: #ffffff;
+        --primary-text-color: #212121;
+        --secondary-text-color: #727272;
+        --divider-color: rgba(0, 0, 0, 0.12);
+        --ha-card-border-radius: 12px;
+        --ha-card-box-shadow: none;
+        --state-active-color: #fdd835;
+        --state-binary_sensor-motion-on-color: #ff9800;
+        --error-color: #db4437;
+        --warning-color: #ffa600;
+        --success-color: #43a047;
+      }
+      :root[data-theme="dark"] {
+        --primary-background-color: #111111;
+        --card-background-color: #1c1c1c;
+        --app-header-background-color: #1c1c1c;
+        --primary-text-color: #e1e1e1;
+        --secondary-text-color: #9b9b9b;
+        --divider-color: rgba(225, 225, 225, 0.12);
+      }
+      body {
+        margin: 0;
+        background: var(--primary-background-color);
+      }
+      #mock-tools {
+        position: fixed;
+        right: 12px;
+        bottom: 12px;
+        display: flex;
+        gap: 8px;
+        z-index: 20;
+        opacity: 0.85;
+      }
+      body.shot #mock-tools {
+        display: none;
+      }
+      #mock-tools button {
+        min-height: 36px;
+        font: 500 13px system-ui, sans-serif;
+        padding: 0 16px;
+        border-radius: 22px;
+        border: 1px solid var(--divider-color);
+        background: var(--card-background-color);
+        color: var(--primary-text-color);
+      }
+      .dashboard {
+        display: grid;
+        gap: 16px;
+        padding: 16px;
+        max-width: 1200px;
+        margin: 0 auto;
+        grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+        align-items: start;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="dashboard">
+      <outglow-map-card id="full"></outglow-map-card>
+      <outglow-map-card id="subset"></outglow-map-card>
+    </div>
+    <div id="mock-tools">
+      <button id="lang" type="button">EN / PL</button>
+      <button id="theme" type="button">Light / dark</button>
+    </div>
+    <script type="module" src="./card.ts"></script>
+  </body>
+</html>

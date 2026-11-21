@@ -1,0 +1,88 @@
+{
+  "command": "outglow/history/range",
+  "request": {
+    "start": 1799996408.0,
+    "end": 1800000008.0,
+    "step_s": 60,
+    "pairs": true
+  },
+  "response": {
+    "rooms": {
+      "living": [
+        [
+          1799996408.0,
+          0.02,
+          false
+        ],
+        [
+          1799996468.0,
+          0.97,
+          true
+        ]
+      ],
+      "hall": [
+        [
+          1799996408.0,
+          0.01,
+          false
+        ]
+      ],
+      "office": []
+    },
+    "events": [
+      {
+        "t": 1799996458.0,
+        "kind": "motion_on",
+        "room": "living",
+        "data": {}
+      },
+      {
+        "t": 1799997008.0,
+        "kind": "false_alarm",
+        "room": "hall",
+        "data": {
+          "source": "feedback"
+        }
+      },
+      {
+        "t": 1799998008.0,
+        "kind": "veto",
+        "room": null,
+        "data": {
+          "kind": "common"
+        }
+      },
+      {
+        "t": 1799999008.0,
+        "kind": "bulb_write",
+        "room": null,
+        "data": {
+          "ieee": "0x0000000000000004",
+          "setting": "sensitivity",
+          "value": 50,
+          "previous": 40
+        }
+      }
+    ],
+    "pairs": [
+      {
+        "a": "0x0000000000000001",
+        "b": "0x0000000000000002",
+        "samples": [
+          [
+            1799996408.0,
+            0
+          ],
+          [
+            1799996468.0,
+            2
+          ],
+          [
+            1799996528.0,
+            null
+          ]
+        ]
+      }
+    ]
+  }
+}

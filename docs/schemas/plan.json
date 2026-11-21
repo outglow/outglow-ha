@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plan.json",
+  "title": "Plan",
+  "description": "Floor plan (architecture.md 4.1). One floor, metres.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "rev", "floor_id", "north_deg", "view_rotation_deg", "background", "rooms", "walls", "doors", "adjacent", "bulbs", "excluded_directions", "retired_rooms"],
+  "properties": {
+    "version": {"const": 1},
+    "rev": {"type": "integer", "minimum": 0, "description": "Revision, raised by every save"},
+    "floor_id": {"type": ["string", "null"]},
+    "north_deg": {"type": "number"},
+    "view_rotation_deg": {"type": "number"},
+    "background": {"oneOf": [{"$ref": "#/$defs/Background"}, {"type": "null"}]},
+    "rooms": {"type": "array", "items": {"$ref": "#/$defs/Room"}},
+    "walls": {"type": "array", "items": {"$ref": "#/$defs/Wall"}},
+    "doors": {"type": "array", "items": {"$ref": "#/$defs/Door"}},
+    "adjacent": {
+      "type": "array",
+      "items": {"type": "array", "prefixItems": [{"$ref": "common.json#/$defs/RoomId"}, {"$ref": "common.json#/$defs/RoomId"}], "minItems": 2, "maxItems": 2},
+      "description": "Room pairs one can walk between; derived from doors, may be overridden"
+    },
+    "bulbs": {"type": "array", "items": {"$ref": "#/$defs/PlanBulb"}},
+    "excluded_directions": {"type": "array", "items": {"$ref": "#/$defs/ExcludedDirection"}},
+    "retired_rooms": {
+      "type": "array",
+      "items": {"$ref": "common.json#/$defs/RoomId"},
+      "description": "Ids of rooms removed from the plan; a new room never takes one, the backend adds removed ids on save"
+    }
+  },
+  "$defs": {
+    "WallKind": {"enum": ["partition", "brick", "concrete", "glass", "none"]},
+    "DoorKind": {"enum": ["door", "opening"]},
+    "BulbHeight": {"enum": ["ceiling", "pendant", "lamp"]},
+    "Background": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "x", "y", "m_per_px", "opacity"],
+      "properties": {
+        "file": {"type": "string", "pattern": "^plan(-[0-9a-f]{16})?\\.(png|jpg|webp|svg)$", "description": "File name under /config/outglow, served only over the websocket; plan-<hash>.<ext> for images stored by outglow/plan/save"},
+        "x": {"type": "number"},
+        "y": {"type": "number"},
+        "m_per_px": {"type": "number", "exclusiveMinimum": 0},
+        "opacity": {"$ref": "common.json#/$defs/Probability"}
+      }
+    },
+    "Room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "outline", "colour", "area_id", "entrance"],
+      "properties": {
+        "id": {"$ref": "common.json#/$defs/RoomId"},
+        "name": {"type": "string", "minLength": 1},
+        "outline": {"type": "array", "items": {"$ref": "common.json#/$defs/Point"}, "minItems": 3},
+        "colour": {"type": "string", "pattern": "^#[0-9a-f]{6}$"},
+        "area_id": {"type": ["string", "null"], "description": "Home Assistant area of the room"},
+        "entrance": {"type": "boolean", "description": "The flat's front door opens into this room"}
+      }
+    },
+    "Wall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a", "b", "kind"],
+      "properties": {
+        "a": {"$ref": "common.json#/$defs/Point"},
+        "b": {"$ref": "common.json#/$defs/Point"},
+        "kind": {"$ref": "#/$defs/WallKind"}
+      }
+    },
+    "Door": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wall", "at", "width", "kind"],
+      "properties": {
+        "wall": {"type": "integer", "minimum": 0, "description": "Index into walls"},
+        "at": {"$ref": "common.json#/$defs/Probability", "description": "Position along the wall, 0 at a, 1 at b"},
+        "width": {"type": "number", "exclusiveMinimum": 0},
+        "kind": {"$ref": "#/$defs/DoorKind"}
+      }
+    },
+    "PlanBulb": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ieee", "x", "y", "height", "room"],
+      "properties": {
+        "ieee": {"$ref": "common.json#/$defs/Ieee"},
+        "x": {"type": "number"},
+        "y": {"type": "number"},
+        "height": {"$ref": "#/$defs/BulbHeight"},
+        "room": {"oneOf": [{"$ref": "common.json#/$defs/RoomId"}, {"type": "null"}], "description": "Manual override; null means the room under the bulb"}
+      }
+    },
+    "ExcludedDirection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rx", "tx", "reason"],
+      "properties": {
+        "rx": {"$ref": "common.json#/$defs/Ieee"},
+        "tx": {"$ref": "common.json#/$defs/Ieee"},
+        "reason": {"type": "string"}
+      }
+    },
+    "PlanGetResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rev", "plan"],
+      "properties": {
+        "rev": {"type": "integer", "minimum": 0},
+        "plan": {"$ref": "#"}
+      }
+    },
+    "PlanSaveRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rev", "plan"],
+      "properties": {
+        "rev": {"type": "integer", "minimum": 0, "description": "Revision the edit started from; a newer stored one fails with rev_conflict"},
+        "plan": {"$ref": "#"},
+        "background_image": {"oneOf": [{"$ref": "#/$defs/BackgroundUpload"}, {"type": "null"}], "description": "A new image for plan.background: stored under a new name with the plan, the file of the plan before is removed with the next save; nothing changes when the save fails"}
+      }
+    },
+    "PlanSaveResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rev", "warnings", "background"],
+      "properties": {
+        "rev": {"type": "integer", "minimum": 0},
+        "warnings": {"type": "array", "items": {"$ref": "#/$defs/PlanWarning"}, "description": "Saved anyway; for now only bulb_pinned_elsewhere"},
+        "background": {"oneOf": [{"$ref": "#/$defs/Background"}, {"type": "null"}], "description": "plan.background as stored: the new file name, or null when the plan pointed at a file that is gone"}
+      }
+    },
+    "BackgroundUpload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mime", "data_base64"],
+      "properties": {
+        "mime": {"enum": ["image/png", "image/jpeg", "image/webp", "image/svg+xml"]},
+        "data_base64": {"type": "string"},
+        "deflated": {"type": "boolean", "description": "data_base64 holds the image deflated (zlib), to stay under the 4 MiB message limit"}
+      }
+    },
+    "PlanImportFormat": {"enum": ["auto", "mieszkanie_yaml", "outglow_json", "valetudo_json"], "description": "auto recognises the content; the others force a reader"},
+    "PlanImportSource": {"enum": ["outglow_plan", "prototype_layout", "prototype_yaml", "valetudo_map"], "description": "What the imported content was recognised as"},
+    "PlanImportRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format"],
+      "description": "Exactly one of text and deflated_base64",
+      "properties": {
+        "format": {"$ref": "#/$defs/PlanImportFormat"},
+        "text": {"type": "string", "maxLength": 16777216},
+        "deflated_base64": {"type": "string", "description": "The text deflated (zlib) and in base64, for files that would not fit the 4 MiB message limit; at most 16 MiB inflated"},
+        "current": {"oneOf": [{"$ref": "#"}, {"type": "null"}], "description": "The plan in the editor, to keep its bulbs; ignored for an Outglow plan, which is taken as it is. From the current plan come its bulbs (unless the file places them), excluded directions, floor, north and view rotation, and the id of each room matched by id or name; a Valetudo map, which holds no more than outlines and names, also takes the matched rooms' names, colours, areas and entrance flags"}
+      }
+    },
+    "PlanWarning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "params"],
+      "properties": {
+        "code": {"enum": ["unknown_bulb", "bulb_outside_rooms", "room_without_bulb", "overlapping_rooms", "dropped_field", "unknown_room", "dropped_segment", "no_segments", "no_doors", "bulbs_not_aligned", "room_simplified", "background_dropped", "bulb_pinned_elsewhere"]},
+        "params": {"type": "object", "additionalProperties": {"$ref": "common.json#/$defs/Scalar"}}
+      }
+    },
+    "KeptBulbs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bulbs", "rooms", "aligned", "rotation_deg", "mirrored", "rms_m"],
+      "description": "Bulbs carried over from the current plan and how they were moved onto the imported rooms",
+      "properties": {
+        "bulbs": {"type": "integer", "minimum": 0},
+        "rooms": {"type": "integer", "minimum": 0, "description": "Rooms matched by id or name; from two on their centres fit a rigid move (both plans are in metres)"},
+        "aligned": {"type": "boolean", "description": "False below two matched rooms: the bulbs keep their coordinates (warning bulbs_not_aligned)"},
+        "rotation_deg": {"type": "number", "description": "Turn of the imported rooms against the current ones; view_rotation_deg is turned back by it and north_deg with it"},
+        "mirrored": {"type": "boolean", "description": "Only from three rooms not in a line and when the mirrored fit is at least twice as close"},
+        "rms_m": {"type": ["number", "null"], "description": "Mismatch of the room centres after the move; null below two rooms"}
+      }
+    },
+    "PlanImportResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "warnings", "source", "background_image", "kept"],
+      "properties": {
+        "plan": {"$ref": "#"},
+        "warnings": {"type": "array", "items": {"$ref": "#/$defs/PlanWarning"}},
+        "source": {"$ref": "#/$defs/PlanImportSource"},
+        "background_image": {"oneOf": [{"$ref": "#/$defs/BackgroundImage"}, {"type": "null"}], "description": "Image for plan.background, sent with outglow/plan/save (background_image) when the plan is saved"},
+        "kept": {"oneOf": [{"$ref": "#/$defs/KeptBulbs"}, {"type": "null"}]}
+      }
+    },
+    "ValetudoRobot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "url"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "Valetudo MQTT identifier"},
+        "name": {"type": "string"},
+        "url": {"type": ["string", "null"], "description": "Web interface from the device registry"}
+      }
+    },
+    "ValetudoRobotsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "robots"],
+      "properties": {
+        "url": {"type": ["string", "null"], "description": "Robot address remembered from the last fetch over HTTP"},
+        "robots": {"type": "array", "items": {"$ref": "#/$defs/ValetudoRobot"}}
+      }
+    },
+    "ValetudoFetchRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {"type": ["string", "null"], "description": "Robot address; the map is read from <url>/api/v2/robot/state/map and the address is remembered"},
+        "robot": {"type": ["string", "null"], "description": "Robot id; the retained map is read over MQTT (+/<id>/MapData/map-data)"},
+        "current": {"oneOf": [{"$ref": "#"}, {"type": "null"}], "description": "As in PlanImportRequest"}
+      }
+    },
+    "BackgroundImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mime", "data_base64"],
+      "properties": {
+        "mime": {"enum": ["image/png", "image/jpeg", "image/webp", "image/svg+xml"]},
+        "data_base64": {"type": "string"}
+      }
+    },
+    "BackgroundGetResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image"],
+      "properties": {"image": {"oneOf": [{"$ref": "#/$defs/BackgroundImage"}, {"type": "null"}]}}
+    },
+    "BackgroundSetResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file"],
+      "properties": {"file": {"type": "string"}}
+    }
+  }
+}

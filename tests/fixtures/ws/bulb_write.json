@@ -1,0 +1,27 @@
+{
+  "command": "outglow/bulb/write",
+  "request": {
+    "ieee": "0x0000000000000004",
+    "setting": "sensitivity",
+    "value": 50,
+    "confirm_token": "c-3f9a"
+  },
+  "response": {
+    "written": true,
+    "t": 1800000013.0
+  },
+  "errors": [
+    {
+      "code": "token_expired",
+      "message": "Confirm again"
+    },
+    {
+      "code": "token_mismatch",
+      "message": "The token was for another change"
+    },
+    {
+      "code": "unauthorized",
+      "message": "Unauthorized"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "command": "outglow/model/snapshots",
+  "request": {},
+  "response": {
+    "snapshots": [
+      {
+        "snapshot_id": "m-0005",
+        "t": 1799827208.0,
+        "reason": "daily",
+        "model_version": 5
+      },
+      {
+        "snapshot_id": "m-0006",
+        "t": 1799992808.0,
+        "reason": "before_session",
+        "model_version": 6
+      }
+    ]
+  }
+}

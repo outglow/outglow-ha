@@ -1,0 +1,29 @@
+{
+  "command": "outglow/bulb/write_preview",
+  "request": {
+    "ieee": "0x0000000000000004",
+    "setting": "sensitivity",
+    "value": 50
+  },
+  "response": {
+    "confirm_token": "c-3f9a",
+    "expires": 1800000068.0,
+    "previous": 40,
+    "effects": [
+      {
+        "code": "overwrites_all_lines",
+        "params": {
+          "lines": 3
+        }
+      },
+      {
+        "code": "clears_calibration",
+        "params": {}
+      },
+      {
+        "code": "disables_auto_calibration",
+        "params": {}
+      }
+    ]
+  }
+}

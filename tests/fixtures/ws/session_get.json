@@ -1,0 +1,36 @@
+{
+  "command": "outglow/session/get",
+  "request": {},
+  "response": {
+    "session": {
+      "session_id": "s-0001",
+      "name": "Evening",
+      "started": 1799999888.0,
+      "state": "running",
+      "raised_rate": false,
+      "steps": [
+        {
+          "index": 0,
+          "kind": "empty",
+          "room": null,
+          "activity": "any",
+          "t0": 1799999898.0,
+          "t1": 1799999988.0
+        },
+        {
+          "index": 1,
+          "kind": "room",
+          "room": "hall",
+          "activity": "walk",
+          "t0": 1799999993.0,
+          "t1": null
+        }
+      ],
+      "live_feedback": {
+        "pairs_reacting": 4,
+        "veto": false
+      },
+      "summary": null
+    }
+  }
+}

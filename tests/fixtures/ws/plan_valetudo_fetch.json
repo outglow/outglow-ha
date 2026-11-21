@@ -1,0 +1,292 @@
+{
+  "command": "outglow/plan/valetudo/fetch",
+  "request": {
+    "url": "http://127.0.0.1:9",
+    "robot": null,
+    "current": null
+  },
+  "response": {
+    "plan": {
+      "version": 1,
+      "rev": 0,
+      "floor_id": null,
+      "north_deg": 0.0,
+      "view_rotation_deg": 0.0,
+      "background": {
+        "file": "plan.svg",
+        "x": 4.65,
+        "y": 4.65,
+        "m_per_px": 0.05,
+        "opacity": 0.6
+      },
+      "rooms": [
+        {
+          "id": "living_room",
+          "name": "Living room",
+          "outline": [
+            [
+              9.125,
+              4.85
+            ],
+            [
+              9.125,
+              8.13
+            ],
+            [
+              4.85,
+              8.13
+            ],
+            [
+              4.85,
+              4.85
+            ]
+          ],
+          "colour": "#4e9af1",
+          "area_id": null,
+          "entrance": false
+        },
+        {
+          "id": "kitchen",
+          "name": "Kitchen",
+          "outline": [
+            [
+              9.125,
+              4.85
+            ],
+            [
+              11.35,
+              4.85
+            ],
+            [
+              11.35,
+              8.13
+            ],
+            [
+              9.125,
+              8.13
+            ]
+          ],
+          "colour": "#f28b30",
+          "area_id": null,
+          "entrance": false
+        },
+        {
+          "id": "hall",
+          "name": "Hall",
+          "outline": [
+            [
+              7.1,
+              8.13
+            ],
+            [
+              7.1,
+              10.075
+            ],
+            [
+              10.15,
+              10.075
+            ],
+            [
+              10.15,
+              11.35
+            ],
+            [
+              4.85,
+              11.35
+            ],
+            [
+              4.85,
+              8.13
+            ]
+          ],
+          "colour": "#42b883",
+          "area_id": null,
+          "entrance": false
+        },
+        {
+          "id": "room_7",
+          "name": "Room 7",
+          "outline": [
+            [
+              7.1,
+              8.13
+            ],
+            [
+              10.15,
+              8.13
+            ],
+            [
+              10.15,
+              10.075
+            ],
+            [
+              7.1,
+              10.075
+            ]
+          ],
+          "colour": "#c678dd",
+          "area_id": null,
+          "entrance": false
+        }
+      ],
+      "walls": [
+        {
+          "a": [
+            9.125,
+            4.85
+          ],
+          "b": [
+            9.125,
+            8.13
+          ],
+          "kind": "partition"
+        },
+        {
+          "a": [
+            9.125,
+            8.13
+          ],
+          "b": [
+            7.1,
+            8.13
+          ],
+          "kind": "partition"
+        },
+        {
+          "a": [
+            7.1,
+            8.13
+          ],
+          "b": [
+            4.85,
+            8.13
+          ],
+          "kind": "partition"
+        },
+        {
+          "a": [
+            10.15,
+            8.13
+          ],
+          "b": [
+            9.125,
+            8.13
+          ],
+          "kind": "partition"
+        },
+        {
+          "a": [
+            7.1,
+            8.13
+          ],
+          "b": [
+            7.1,
+            10.075
+          ],
+          "kind": "partition"
+        },
+        {
+          "a": [
+            7.1,
+            10.075
+          ],
+          "b": [
+            10.15,
+            10.075
+          ],
+          "kind": "partition"
+        }
+      ],
+      "doors": [
+        {
+          "wall": 0,
+          "at": 0.4878,
+          "width": 0.9,
+          "kind": "door"
+        },
+        {
+          "wall": 2,
+          "at": 0.5111,
+          "width": 0.9,
+          "kind": "door"
+        },
+        {
+          "wall": 5,
+          "at": 0.4262,
+          "width": 0.8,
+          "kind": "door"
+        }
+      ],
+      "adjacent": [
+        [
+          "living_room",
+          "kitchen"
+        ],
+        [
+          "living_room",
+          "hall"
+        ],
+        [
+          "hall",
+          "room_7"
+        ]
+      ],
+      "bulbs": [],
+      "excluded_directions": [],
+      "retired_rooms": []
+    },
+    "warnings": [
+      {
+        "code": "dropped_segment",
+        "params": {
+          "segment": "9",
+          "name": null,
+          "area_m2": 0.04
+        }
+      },
+      {
+        "code": "room_without_bulb",
+        "params": {
+          "room": "living_room"
+        }
+      },
+      {
+        "code": "room_without_bulb",
+        "params": {
+          "room": "kitchen"
+        }
+      },
+      {
+        "code": "room_without_bulb",
+        "params": {
+          "room": "hall"
+        }
+      },
+      {
+        "code": "room_without_bulb",
+        "params": {
+          "room": "room_7"
+        }
+      },
+      {
+        "code": "overlapping_rooms",
+        "params": {
+          "a": "hall",
+          "b": "room_7"
+        }
+      }
+    ],
+    "source": "valetudo_map",
+    "background_image": {
+      "mime": "image/svg+xml",
+      "data_base64": "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNTgiIGhlaWdodD0iMTQwIiB2aWV3Qm94PSIwIDAgMTU4IDE0MCIgc2hhcGUtcmVuZGVyaW5nPSJjcmlzcEVkZ2VzIj48cGF0aCBmaWxsPSIjOWFhMGE2IiBmaWxsLW9wYWNpdHk9IjAuMzUiIGQ9Ik03IDdoODB2MjBoLTgwek05MSA3aDQwdjIwaC00MHpNNyA0NWg4MHYyMmgtODB6TTkxIDQ1aDQwdjIyaC00MHpNNyAyN2gxMjR2MThoLTEyNHpNMTM3IDI3aDE2djMxaC0xNnpNMTcgNjdoMTh2NGgtMTh6TTcgNzFoNDB2NDBoLTQwek01MSA3MWg1NnYzNmgtNTZ6TTY3IDEwN2gxNnY0aC0xNnpNNyAxMTFoMTAwdjIwaC0xMDB6TTExMCAxMTdoNHY0aC00eiIvPjxwYXRoIGZpbGw9IiM1ZjYzNjgiIGQ9Ik04NyA3aDR2MjBoLTR6TTUgN2gydjYwaC0yek01IDVoMTMwdjJoLTEzMHpNNSAxMzNoMTMwdjJoLTEzMHpNNSA3MWgydjYyaC0yek04NyA0NWg0djIyaC00ek0xMzEgN2g0djYwaC00ek01IDY3aDEydjRoLTEyek0zNSA2N2gxMDB2NGgtMTAwek00NyA3MWg0djM2aC00ek0xMzMgNzFoMnY2MmgtMnpNNDcgMTA3aDIwdjRoLTIwek04MyAxMDdoMjR2NGgtMjR6Ii8+PC9zdmc+"
+    },
+    "kept": null
+  },
+  "errors": [
+    {
+      "code": "fetch_failed",
+      "message": "Cannot reach the robot: ClientConnectorError"
+    }
+  ]
+}

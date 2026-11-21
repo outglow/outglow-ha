@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "history.json",
+  "title": "History",
+  "$defs": {
+    "EventKind": {"enum": ["motion_on", "motion_off", "false_alarm", "missed", "correct", "label", "veto", "bulb_write", "model_apply", "model_discard", "model_rollback", "session_start", "session_stop", "house_empty", "house_occupied"]},
+    "HistoryEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "kind", "room", "data"],
+      "properties": {
+        "t": {"$ref": "common.json#/$defs/Timestamp"},
+        "kind": {"$ref": "#/$defs/EventKind"},
+        "room": {"oneOf": [{"$ref": "common.json#/$defs/RoomId"}, {"type": "null"}]},
+        "data": {"type": "object", "additionalProperties": {"$ref": "common.json#/$defs/Scalar"}}
+      }
+    },
+    "RoomSample": {
+      "type": "array",
+      "prefixItems": [{"$ref": "common.json#/$defs/Timestamp"}, {"$ref": "common.json#/$defs/Probability"}, {"type": "boolean"}],
+      "minItems": 3,
+      "maxItems": 3,
+      "description": "t, p, motion"
+    },
+    "PairSample": {
+      "type": "array",
+      "prefixItems": [{"$ref": "common.json#/$defs/Timestamp"}, {"oneOf": [{"$ref": "frame.json#/$defs/PairObservation"}, {"type": "null"}]}],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "PairSeries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a", "b", "samples"],
+      "properties": {
+        "a": {"$ref": "common.json#/$defs/Ieee"},
+        "b": {"$ref": "common.json#/$defs/Ieee"},
+        "samples": {"type": "array", "items": {"$ref": "#/$defs/PairSample"}}
+      }
+    },
+    "HistoryRangeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end", "step_s"],
+      "properties": {
+        "start": {"$ref": "common.json#/$defs/Timestamp"},
+        "end": {"$ref": "common.json#/$defs/Timestamp"},
+        "step_s": {"type": "number", "minimum": 0.5},
+        "pairs": {"type": "boolean", "description": "Also return pair series (default false)"}
+      }
+    },
+    "HistoryRangeResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rooms", "events", "pairs"],
+      "properties": {
+        "rooms": {"type": "object", "additionalProperties": {"type": "array", "items": {"$ref": "#/$defs/RoomSample"}}},
+        "events": {"type": "array", "items": {"$ref": "#/$defs/HistoryEvent"}},
+        "pairs": {"oneOf": [{"type": "array", "items": {"$ref": "#/$defs/PairSeries"}}, {"type": "null"}]}
+      }
+    },
+    "HistoryFramesRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": {"$ref": "common.json#/$defs/Timestamp"},
+        "end": {"$ref": "common.json#/$defs/Timestamp"}
+      }
+    },
+    "HistoryFramesResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frames", "truncated"],
+      "properties": {
+        "frames": {"type": "array", "items": {"$ref": "frame.json"}},
+        "truncated": {"type": "boolean", "description": "Raw data ended before end (older than the raw retention), or the window was longer than 5 minutes and was cut after start + 300 s; ask again from the last frame for the rest"}
+      }
+    },
+    "FeedbackRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room", "kind"],
+      "description": "Same as the outglow.feedback service: a correction from the history view",
+      "properties": {
+        "room": {"$ref": "common.json#/$defs/RoomId"},
+        "kind": {"enum": ["false_alarm", "missed", "correct"], "description": "false_alarm: motion was reported but nobody was there; missed: somebody was there and nothing was reported; correct: the report was right"},
+        "when": {"oneOf": [{"$ref": "common.json#/$defs/Timestamp"}, {"type": "null"}], "description": "The moment the correction is about; default now. For false_alarm and correct the backend looks for the motion that started up to 10 minutes before"}
+      }
+    },
+    "FeedbackResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pending_id"],
+      "properties": {
+        "pending_id": {"type": ["string", "null"], "description": "The model proposal that received the label; null when online learning is off and the label was only stored"}
+      }
+    }
+  }
+}

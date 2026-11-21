@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "info.json",
+  "title": "Info",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "status", "base_topic", "units", "capabilities"],
+  "properties": {
+    "version": {"type": "string", "description": "Integration version"},
+    "status": {"$ref": "frame.json#/$defs/Status"},
+    "base_topic": {"type": "string"},
+    "units": {"enum": ["metric", "imperial"], "description": "Length units of the Home Assistant configuration; the plan is always in metres"},
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["has_persons", "has_ble", "z2m_version"],
+      "properties": {
+        "has_persons": {"type": "boolean"},
+        "has_ble": {"type": "boolean"},
+        "z2m_version": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

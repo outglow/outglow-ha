@@ -1,0 +1,94 @@
+feedback:
+  fields:
+    room:
+      required: true
+      selector:
+        text:
+    kind:
+      required: true
+      selector:
+        select:
+          options:
+            - false_alarm
+            - missed
+            - correct
+          translation_key: feedback_kind
+    when:
+      selector:
+        datetime:
+label:
+  fields:
+    room:
+      selector:
+        text:
+    empty:
+      default: false
+      selector:
+        boolean:
+    activity:
+      required: true
+      selector:
+        select:
+          options:
+            - walk
+            - still
+            - transition
+          translation_key: label_activity
+    duration:
+      default: 60
+      selector:
+        number:
+          min: 1
+          max: 86400
+          unit_of_measurement: s
+start_session:
+  fields:
+    name:
+      selector:
+        text:
+stop_session:
+export_recording:
+  fields:
+    start:
+      required: true
+      selector:
+        datetime:
+    end:
+      required: true
+      selector:
+        datetime:
+    include_raw:
+      default: true
+      selector:
+        boolean:
+reset_learning:
+  fields:
+    room:
+      selector:
+        text:
+write_bulb_setting:
+  fields:
+    bulb:
+      required: true
+      selector:
+        text:
+    setting:
+      required: true
+      selector:
+        select:
+          options:
+            - sensing
+            - sensitivity
+            - probes
+            - auto_calibration
+            - self_tuning
+            - calibrate
+          translation_key: bulb_setting
+    value:
+      required: true
+      selector:
+        object:
+    confirm:
+      required: true
+      selector:
+        boolean:

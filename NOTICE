@@ -1,0 +1,14 @@
+Outglow for Home Assistant
+Copyright (C) 2026 The Outglow authors
+
+Outglow for Home Assistant is free software: you can redistribute it and/or
+modify it under the terms of the GNU General Public License as published by the
+Free Software Foundation, either version 3 of the License, or (at your option)
+any later version. See LICENSE.
+
+Trademarks
+----------
+
+Home Assistant, Zigbee, Zigbee2MQTT, Valetudo, EGLO and AwoX are trademarks of
+their respective owners. Outglow is not affiliated with or endorsed by any of
+them; the names are used only to say what the software works with.

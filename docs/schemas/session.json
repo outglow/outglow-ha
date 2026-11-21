@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "session.json",
+  "title": "Session",
+  "description": "Learning wizard session (architecture.md 6.3). Labels enter the model only after outglow/model/apply (D4).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "name", "started", "state", "raised_rate", "steps", "live_feedback", "summary"],
+  "properties": {
+    "session_id": {"type": "string"},
+    "name": {"type": "string"},
+    "started": {"$ref": "common.json#/$defs/Timestamp"},
+    "state": {"enum": ["running", "stopped"]},
+    "raised_rate": {"type": "boolean", "description": "Activity reports raised to 4/s for this session; restored on stop"},
+    "steps": {"type": "array", "items": {"$ref": "#/$defs/SessionStep"}},
+    "live_feedback": {"$ref": "#/$defs/LiveFeedback"},
+    "summary": {"oneOf": [{"$ref": "#/$defs/SessionSummary"}, {"type": "null"}]}
+  },
+  "$defs": {
+    "SessionStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "kind", "room", "activity", "t0", "t1"],
+      "properties": {
+        "index": {"type": "integer", "minimum": 0},
+        "kind": {"enum": ["room", "empty", "transition"]},
+        "room": {"oneOf": [{"$ref": "common.json#/$defs/RoomId"}, {"type": "null"}]},
+        "activity": {"enum": ["walk", "still", "any"]},
+        "t0": {"$ref": "common.json#/$defs/Timestamp"},
+        "t1": {"oneOf": [{"$ref": "common.json#/$defs/Timestamp"}, {"type": "null"}]}
+      }
+    },
+    "LiveFeedback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pairs_reacting", "veto"],
+      "properties": {
+        "pairs_reacting": {"type": "integer", "minimum": 0, "description": "Pairs seeing motion now; no room guesses during learning"},
+        "veto": {"type": "boolean"}
+      }
+    },
+    "SessionSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rooms", "matrix_before", "matrix_after", "accuracy_before", "accuracy_after", "weak_rooms", "pending_id"],
+      "properties": {
+        "rooms": {"type": "array", "items": {"$ref": "common.json#/$defs/RoomId"}, "description": "Row order of the matrices; the last column is no room"},
+        "matrix_before": {"type": "array", "items": {"type": "array", "items": {"type": "number", "minimum": 0}}},
+        "matrix_after": {"type": "array", "items": {"type": "array", "items": {"type": "number", "minimum": 0}}},
+        "accuracy_before": {"oneOf": [{"$ref": "common.json#/$defs/Probability"}, {"type": "null"}]},
+        "accuracy_after": {"oneOf": [{"$ref": "common.json#/$defs/Probability"}, {"type": "null"}], "description": "After applying, in the active mode; bayes: cross-validated over halves of each walk step of this same session (optimistic); rules: the same as before, rules do not learn. A tie between rooms counts as no room"},
+        "weak_rooms": {"type": "array", "items": {"$ref": "common.json#/$defs/RoomId"}},
+        "pending_id": {"type": ["string", "null"], "description": "Model proposal to apply with outglow/model/apply"},
+        "mode": {"$ref": "settings.json#/$defs/Mode", "description": "Detection mode active when the session ended; the matrices and accuracies are in this mode"},
+        "bayes": {"oneOf": [{"$ref": "#/$defs/SessionScore"}, {"type": "null"}], "description": "The same session scored in bayes mode when the active mode is rules"},
+        "suggest_mode": {"oneOf": [{"$ref": "settings.json#/$defs/Mode"}, {"type": "null"}], "description": "Mode worth switching to: bayes after learning beats the active rules by at least 10 points"},
+        "rooms_without_bulbs": {"type": "array", "items": {"$ref": "common.json#/$defs/RoomId"}, "description": "Rooms seen only by lines crossing them; never lit in rules mode"},
+        "empty_house_hours": {"type": "number", "minimum": 0, "description": "Empty house the model will have learned from after applying: the active model plus this session's empty step. Below 2 h false alarms in an empty house are unknown"}
+      }
+    },
+    "SessionScore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matrix_before", "matrix_after", "accuracy_before", "accuracy_after"],
+      "properties": {
+        "matrix_before": {"type": "array", "items": {"type": "array", "items": {"type": "number", "minimum": 0}}},
+        "matrix_after": {"type": "array", "items": {"type": "array", "items": {"type": "number", "minimum": 0}}},
+        "accuracy_before": {"oneOf": [{"$ref": "common.json#/$defs/Probability"}, {"type": "null"}]},
+        "accuracy_after": {"oneOf": [{"$ref": "common.json#/$defs/Probability"}, {"type": "null"}]}
+      }
+    },
+    "SessionStartRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string"},
+        "raise_rate": {"type": "boolean", "description": "Explicit consent to 4 reports/s during the session (D7); default false"}
+      }
+    },
+    "SessionLabelRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "activity"],
+      "properties": {
+        "kind": {"enum": ["room", "empty", "transition"]},
+        "room": {"$ref": "common.json#/$defs/RoomId"},
+        "activity": {"enum": ["walk", "still", "any"]},
+        "ts": {"type": "number", "description": "Phone clock, only to check delays"}
+      }
+    },
+    "SessionGetResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session"],
+      "properties": {"session": {"oneOf": [{"$ref": "#"}, {"type": "null"}]}}
+    }
+  }
+}

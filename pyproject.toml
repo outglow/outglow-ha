@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "outglow-ha"
+version = "0.0.1"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.14"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=9", "pytest-cov>=7", "jsonschema>=4.26", "types-jsonschema"]
+lint = ["ruff>=0.17", "mypy>=2.4"]
+ha = ["pytest-homeassistant-custom-component==0.13.375", "home-assistant-frontend==20260930.5"]
+
+[tool.setuptools]
+packages = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore::pytest.PytestConfigWarning"]
+
+[tool.coverage.run]
+branch = false
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+extend-exclude = ["frontend", "custom_components/outglow/frontend", "*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ASYNC", "PT", "C4", "PIE", "RET"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["custom_components", "engine", "tools"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+warn_unreachable = true
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["pytest_homeassistant_custom_component.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["homeassistant.*"]
+implicit_reexport = true

@@ -1,0 +1,10 @@
+{
+  "command": "outglow/model/discard",
+  "request": {
+    "pending_id": "p-0007"
+  },
+  "response": {
+    "model_version": 6,
+    "snapshot_id": null
+  }
+}

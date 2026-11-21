@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "recording.json",
+  "title": "RecordingLine",
+  "description": "One line of a JSONL recording, format 2 (architecture.md 4.4). The first line is the header. Readers skip unknown types.",
+  "oneOf": [
+    {"$ref": "#/$defs/HeaderRecord"},
+    {"$ref": "#/$defs/BulbRecord"},
+    {"$ref": "#/$defs/LightRecord"},
+    {"$ref": "#/$defs/ContextRecord"},
+    {"$ref": "#/$defs/LabelRecord"},
+    {"$ref": "#/$defs/FrameRecord"}
+  ],
+  "$defs": {
+    "HeaderRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "format", "plan", "settings", "created", "generator"],
+      "properties": {
+        "type": {"const": "header"},
+        "format": {"const": 2},
+        "plan": {"oneOf": [{"$ref": "plan.json"}, {"type": "null"}]},
+        "settings": {"oneOf": [{"$ref": "settings.json"}, {"type": "null"}]},
+        "created": {"oneOf": [{"$ref": "common.json#/$defs/Timestamp"}, {"type": "null"}]},
+        "generator": {"type": ["string", "null"]}
+      }
+    },
+    "RecordingLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ieee_address", "activity", "motion", "signal", "noise"],
+      "properties": {
+        "ieee_address": {"$ref": "common.json#/$defs/Ieee"},
+        "activity": {"type": ["integer", "null"], "description": "As Zigbee2MQTT gave it; the record's source says what it means"},
+        "motion": {"type": "boolean"},
+        "signal": {"type": ["integer", "null"]},
+        "noise": {"type": ["number", "null"]},
+        "sensitivity": {"type": ["integer", "null"]},
+        "calibrated_sensitivity": {"type": ["integer", "null"]}
+      }
+    },
+    "LightStateRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["on", "brightness", "color_temp"],
+      "properties": {
+        "on": {"type": "boolean"},
+        "brightness": {"type": ["integer", "null"]},
+        "color_temp": {"type": ["integer", "null"]}
+      }
+    },
+    "BulbRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "type", "name", "ieee", "source", "links", "occupancy", "light"],
+      "properties": {
+        "t": {"$ref": "common.json#/$defs/Timestamp"},
+        "type": {"const": "bulb"},
+        "name": {"type": "string"},
+        "ieee": {"$ref": "common.json#/$defs/Ieee"},
+        "source": {"enum": ["activity", "lines", "unknown"]},
+        "links": {"type": "array", "items": {"$ref": "#/$defs/RecordingLink"}},
+        "occupancy": {"type": ["boolean", "null"]},
+        "room_occupancy": {"type": ["boolean", "null"]},
+        "light": {"oneOf": [{"$ref": "#/$defs/LightStateRecord"}, {"type": "null"}]}
+      }
+    },
+    "LightRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "type", "ieee", "origin", "on"],
+      "properties": {
+        "t": {"$ref": "common.json#/$defs/Timestamp"},
+        "type": {"const": "light"},
+        "ieee": {"$ref": "common.json#/$defs/Ieee"},
+        "origin": {"enum": ["ours", "user", "remote", "unknown"]},
+        "on": {"type": ["boolean", "null"]}
+      }
+    },
+    "ContextRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "type", "persons_home", "house_empty", "offline"],
+      "properties": {
+        "t": {"$ref": "common.json#/$defs/Timestamp"},
+        "type": {"const": "context"},
+        "persons_home": {"type": "array", "items": {"type": "string"}},
+        "house_empty": {"enum": ["yes", "soft", "no", "unknown"]},
+        "offline": {"type": "array", "items": {"$ref": "common.json#/$defs/Ieee"}}
+      }
+    },
+    "Label": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t0", "t1", "kind", "room", "activity", "source", "weight"],
+      "properties": {
+        "t0": {"$ref": "common.json#/$defs/Timestamp"},
+        "t1": {"$ref": "common.json#/$defs/Timestamp"},
+        "kind": {"enum": ["room", "empty", "transition"]},
+        "room": {"oneOf": [{"$ref": "common.json#/$defs/RoomId"}, {"type": "null"}]},
+        "activity": {"enum": ["walk", "still", "any"]},
+        "source": {"enum": ["wizard", "recording", "service", "feedback", "empty_house", "manual_light"]},
+        "weight": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "LabelRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "type", "label"],
+      "properties": {
+        "t": {"$ref": "common.json#/$defs/Timestamp"},
+        "type": {"const": "label"},
+        "label": {"$ref": "#/$defs/Label"}
+      }
+    },
+    "FrameRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "type", "frame"],
+      "properties": {
+        "t": {"$ref": "common.json#/$defs/Timestamp"},
+        "type": {"const": "frame"},
+        "frame": {"$ref": "frame.json"}
+      }
+    }
+  }
+}

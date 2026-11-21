@@ -1,0 +1,10 @@
+{
+  "command": "outglow/plan/background/get",
+  "request": {},
+  "response": {
+    "image": {
+      "mime": "image/png",
+      "data_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    }
+  }
+}

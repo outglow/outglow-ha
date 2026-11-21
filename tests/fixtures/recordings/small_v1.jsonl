@@ -1,0 +1,13 @@
+{"t": 1800000000.0, "type": "layout", "layout": {"bulbs": [{"id": "b1", "z2m": "Test/Living 1", "ieee": "0x0000000000000001", "x": 120.0, "y": 80.0}, {"id": "b2", "z2m": "Test/Living 2", "ieee": "0x0000000000000002", "x": 300.0, "y": 90.0}, {"id": "b3", "z2m": "Test/Hall", "ieee": "0x0000000000000003", "x": 420.0, "y": 150.0}], "walls_added": [], "walls_erased": [], "room_paint": {}, "view_rotation": 0, "version": 1}}
+{"t": 1800000001.0, "type": "truth", "event": "start", "ts": 1800000000.9, "session": "s1"}
+{"t": 1800000001.5, "type": "bulb", "name": "Test/Living 1", "links": [{"ieee_address": "0x0000000000000002", "activity": 31, "motion": true, "signal": -61, "noise": 1}, {"ieee_address": "0x0000000000000003", "activity": 12, "motion": false, "signal": -72, "noise": 2}], "occupancy": true, "room_occupancy": true}
+{"t": 1800000002.0, "type": "truth", "kind": "walk", "x": 150.0, "y": 100.0, "room": "living", "ts": 1800000001.9, "session": "s1"}
+{"t": 1800000002.1, "type": "bulb", "name": "Test/Living 2", "links": [{"ieee_address": "0x0000000000000001", "activity": 28, "motion": true, "signal": -60, "noise": 1}, {"ieee_address": null, "activity": 9, "motion": false, "signal": -80, "noise": 3}], "occupancy": true, "room_occupancy": true}
+{"t": 1800000002.6, "type": "estimate", "room": "living", "x": 140.0, "y": 95.0, "confidence": 0.7, "activity": 12.0}
+{"t": 1800000003.0, "type": "bulb", "name": "Unknown bulb", "links": [], "occupancy": false, "room_occupancy": false}
+{"t": 1800000006.0, "type": "truth", "kind": "stand", "x": 420.0, "y": 150.0, "room": "hall", "ts": 1800000005.9, "session": "s1"}
+{"t": 1800000006.4, "type": "bulb", "name": "Test/Hall", "links": [{"ieee_address": "0x0000000000000001", "activity": 14, "motion": false, "signal": -72, "noise": 2}], "occupancy": false, "room_occupancy": false}
+{"t": 1800000009.0, "type": "truth", "kind": "empty", "ts": 1800000008.9, "session": "s1"}
+{"t": 1800000012.0, "type": "truth", "event": "stop", "ts": 1800000011.9, "session": "s1"}
+{"t": 1800000013.0, "type": "truth", "kind": "sit", "x": 150.0, "y": 100.0, "room": "living", "ts": 1800000012.9, "session": "s2"}
+{"t": 1800000015.0, "type": "bulb", "name": "Test/Living 1", "links": [{"ieee_address": "0x0000000000000002", "activity": 7, "motion": false, "signal": -61, "noise": 1}], "occupancy": false, "room_occupancy": false}

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bulbs.json",
+  "title": "BulbList",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["bulbs"],
+  "properties": {"bulbs": {"type": "array", "items": {"$ref": "#/$defs/Bulb"}}},
+  "$defs": {
+    "BulbLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tx", "signal", "frozen", "weak"],
+      "properties": {
+        "tx": {"$ref": "common.json#/$defs/Ieee"},
+        "signal": {"type": ["integer", "null"], "description": "dBm"},
+        "frozen": {"type": "boolean"},
+        "weak": {"type": "boolean"}
+      }
+    },
+    "Bulb": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ieee", "name", "model", "available", "sensing", "probes", "activity_rate", "sensitivity", "auto_calibration", "light_entity", "area_id", "gate_duty_24h", "lines"],
+      "properties": {
+        "ieee": {"$ref": "common.json#/$defs/Ieee"},
+        "name": {"type": "string", "description": "Zigbee2MQTT friendly name, may contain /"},
+        "model": {"type": "string"},
+        "available": {"type": "boolean"},
+        "sensing": {"type": "boolean"},
+        "probes": {"type": ["integer", "null"], "minimum": 0, "description": "Probes per second"},
+        "activity_rate": {"type": ["number", "null"], "minimum": 0, "description": "Activity reports per second while the gate is open"},
+        "sensitivity": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
+        "auto_calibration": {"type": ["boolean", "null"]},
+        "light_entity": {"type": ["string", "null"]},
+        "area_id": {"type": ["string", "null"]},
+        "gate_duty_24h": {"oneOf": [{"$ref": "common.json#/$defs/Probability"}, {"type": "null"}], "description": "Share of the last day with the gate open"},
+        "lines": {"type": "array", "items": {"$ref": "#/$defs/BulbLine"}}
+      }
+    }
+  }
+}

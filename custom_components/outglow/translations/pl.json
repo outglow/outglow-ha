@@ -1,0 +1,309 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Zigbee2MQTT",
+        "description": "Outglow czyta raporty ruchu żarówek Outglow z Zigbee2MQTT przez MQTT. Nic nie jest zapisywane do żarówek.",
+        "data": {
+          "base_topic": "Temat bazowy"
+        },
+        "data_description": {
+          "base_topic": "base_topic Zigbee2MQTT, zwykle zigbee2mqtt"
+        }
+      },
+      "summary": {
+        "title": "Żarówki Outglow",
+        "description": "Mostek na {topic} odpowiedział. Zigbee2MQTT {version}. Znaleziono {bulbs} żarówek Outglow; wykrywanie włączone w {sensing}; raporty aktywności włączone w {reporting}.\n\nBez raportów aktywności (opcja urządzenia motion_activity_rate > 0) Outglow widzi tylko bity ruchu żarówek. Outglow tego nie zmienia: ustaw to w Zigbee2MQTT, jeśli chcesz. Śledzenie ruchu pokazuje, kiedy ktoś porusza się w którym pokoju: powiedz o tym domownikom."
+      },
+      "no_bridge": {
+        "title": "Zigbee2MQTT nie odpowiedział na {topic}",
+        "description": "Przez kilka sekund nic nie przyszło na {topic}/bridge/devices. Sprawdź temat bazowy i czy Zigbee2MQTT działa. Outglow można dodać i tak; zacznie działać, gdy mostek się pojawi.\n\nBez raportów aktywności (opcja urządzenia motion_activity_rate > 0) Outglow widzi tylko bity ruchu żarówek. Outglow tego nie zmienia: ustaw to w Zigbee2MQTT, jeśli chcesz. Śledzenie ruchu pokazuje, kiedy ktoś porusza się w którym pokoju: powiedz o tym domownikom."
+      }
+    },
+    "error": {
+      "invalid_topic": "Podaj temat bez symboli wieloznacznych"
+    },
+    "abort": {
+      "already_configured": "Outglow jest już skonfigurowany dla tego tematu",
+      "single_instance_allowed": "Outglow jest już skonfigurowany",
+      "mqtt_missing": "Najpierw skonfiguruj integrację MQTT"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Outglow",
+        "data": {
+          "log_level": "Poziom logów"
+        },
+        "description": "Resztę ustawień ma panel Outglow (Ustawienia)."
+      }
+    }
+  },
+  "selector": {
+    "log_level": {
+      "options": {
+        "debug": "Debug",
+        "info": "Info",
+        "warning": "Ostrzeżenia"
+      }
+    },
+    "feedback_kind": {
+      "options": {
+        "false_alarm": "Fałszywy alarm",
+        "missed": "Przeoczony ruch",
+        "correct": "Słusznie"
+      }
+    },
+    "label_activity": {
+      "options": {
+        "walk": "Chodzenie",
+        "still": "Bez ruchu",
+        "transition": "Przejście do następnego pokoju"
+      }
+    },
+    "bulb_setting": {
+      "options": {
+        "sensing": "Wykrywanie ruchu",
+        "sensitivity": "Czułość",
+        "probes": "Sondy",
+        "auto_calibration": "Automatyczna kalibracja",
+        "self_tuning": "Samostrojenie",
+        "calibrate": "Kalibracja"
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "occupancy": {
+        "name": "Obecność"
+      },
+      "home_motion": {
+        "name": "Ruch w domu"
+      }
+    },
+    "sensor": {
+      "motion_room": {
+        "name": "Pokój z ruchem",
+        "state": {
+          "none": "Brak"
+        }
+      },
+      "status": {
+        "name": "Stan",
+        "state": {
+          "learning": "Uczy się",
+          "ready": "Gotowy",
+          "degraded": "Ograniczony",
+          "paused": "Wstrzymany"
+        }
+      },
+      "false_alarms_24h": {
+        "name": "Fałszywe alarmy (24 h)"
+      }
+    },
+    "switch": {
+      "sensing": {
+        "name": "Wykrywanie"
+      },
+      "learning": {
+        "name": "Uczenie"
+      }
+    },
+    "select": {
+      "false_alarm_budget": {
+        "name": "Budżet pomyłek"
+      },
+      "reaction": {
+        "name": "Reakcja",
+        "state": {
+          "fast": "Szybka",
+          "normal": "Zwykła",
+          "calm": "Spokojna"
+        }
+      }
+    },
+    "number": {
+      "hold_time": {
+        "name": "Czas podtrzymania"
+      }
+    },
+    "button": {
+      "delete_motion_history": {
+        "name": "Usuń historię ruchu"
+      }
+    }
+  },
+  "services": {
+    "feedback": {
+      "name": "Poprawka",
+      "description": "Zgłoś, że ruch w pokoju był fałszywy, przeoczony albo słuszny.",
+      "fields": {
+        "room": {
+          "name": "Pokój",
+          "description": "Id albo nazwa pokoju planu"
+        },
+        "kind": {
+          "name": "Rodzaj",
+          "description": "Co było źle albo dobrze"
+        },
+        "when": {
+          "name": "Kiedy",
+          "description": "Domyślnie teraz"
+        }
+      }
+    },
+    "label": {
+      "name": "Etykieta",
+      "description": "Oznacz ostatnie sekundy: ktoś był w pokoju albo dom był pusty.",
+      "fields": {
+        "room": {
+          "name": "Pokój",
+          "description": "Id albo nazwa"
+        },
+        "empty": {
+          "name": "Pusto",
+          "description": "Nikogo nie było"
+        },
+        "activity": {
+          "name": "Aktywność",
+          "description": "Co robiła osoba"
+        },
+        "duration": {
+          "name": "Czas",
+          "description": "Sekundy wstecz od teraz"
+        }
+      }
+    },
+    "start_session": {
+      "name": "Rozpocznij sesję",
+      "description": "Rozpocznij sesję nauki z etykietami.",
+      "fields": {
+        "name": {
+          "name": "Nazwa",
+          "description": "Nazwa sesji"
+        }
+      }
+    },
+    "stop_session": {
+      "name": "Zakończ sesję",
+      "description": "Zakończ trwającą sesję nauki."
+    },
+    "export_recording": {
+      "name": "Eksportuj nagranie",
+      "description": "Zapisz nagranie JSONL w /config/outglow/exports. Plik mówi, kto i kiedy był w którym pokoju.",
+      "fields": {
+        "start": {
+          "name": "Od",
+          "description": "Początek"
+        },
+        "end": {
+          "name": "Do",
+          "description": "Koniec"
+        },
+        "include_raw": {
+          "name": "Z surowymi raportami",
+          "description": "Raporty żarówek, nie tylko etykiety"
+        }
+      }
+    },
+    "reset_learning": {
+      "name": "Zresetuj naukę",
+      "description": "Model wraca do priorów; najpierw migawka.",
+      "fields": {
+        "room": {
+          "name": "Pokój",
+          "description": "Jeszcze nieobsługiwane"
+        }
+      }
+    },
+    "write_bulb_setting": {
+      "name": "Zapisz ustawienie żarówki",
+      "description": "Zmień ustawienie wykrywania w żarówce. Czułość nadpisuje wszystkie linie żarówki i kasuje jej kalibrację.",
+      "fields": {
+        "bulb": {
+          "name": "Żarówka",
+          "description": "Adres IEEE albo nazwa w Zigbee2MQTT"
+        },
+        "setting": {
+          "name": "Ustawienie",
+          "description": "Które ustawienie"
+        },
+        "value": {
+          "name": "Wartość",
+          "description": "Nowa wartość"
+        },
+        "confirm": {
+          "name": "Potwierdź",
+          "description": "Musi być true"
+        }
+      }
+    }
+  },
+  "issues": {
+    "rates_not_restored": {
+      "title": "Nie przywrócono częstości raportów",
+      "description": "Outglow usunięto albo wyłączono, gdy MQTT było niedostępne, więc {count} żarówek może nadal raportować z częstością podniesioną na sesję: {bulbs}. Home Assistant przywraca każdą z nich, gdy Zigbee2MQTT poda jej opcje, i tylko jeśli nadal ma częstość podniesioną (zmienionej ręcznie nie rusza). Nieudana próba jest ponawiana coraz rzadziej, teraz co {retry} min, najrzadziej co 30 min. Po restarcie dodaj albo włącz Outglow ponownie (przywróci je przy starcie) albo ustaw motion_activity_rate tych żarówek w Zigbee2MQTT."
+    },
+    "output_attribute": {
+      "title": "Zigbee2MQTT wysyła atrybuty, nie JSON",
+      "description": "Outglow potrzebuje advanced.output json (albo attribute_and_json) w Zigbee2MQTT na {base_topic}."
+    },
+    "bridge_offline": {
+      "title": "Zigbee2MQTT jest offline",
+      "description": "Mostek na {base_topic} zgłasza offline; wykrywanie czeka."
+    },
+    "no_converter": {
+      "title": "Brak konwertera Outglow",
+      "description": "{bulbs} żarówek Outglow nie pokazuje motion_links. Zainstaluj outglow.mjs w Zigbee2MQTT."
+    },
+    "no_activity_reports": {
+      "title": "Brak raportów aktywności z {bulb}",
+      "description": "{bulb} wykrywa ruch, ale od doby nie wysłała raportów aktywności. Ustaw motion_activity_rate w Zigbee2MQTT."
+    },
+    "plan_incomplete": {
+      "title": "Plan jest niepełny",
+      "description": "Żarówki z wykrywaniem spoza planu: {bulbs}. Żarówki poza pokojami: {outside}."
+    },
+    "plan_missing": {
+      "title": "Narysuj plan",
+      "description": "Otwórz Outglow → Plan i narysuj pokoje i żarówki."
+    },
+    "room_no_coverage": {
+      "title": "Pokój {room} bez pokrycia",
+      "description": "Żadna para żarówek nie widzi ruchu w pokoju {room}, więc obecność w nim jest niedostępna."
+    },
+    "recommendation_skip_direction": {
+      "title": "Kierunek szumi",
+      "description": "Zobacz Outglow → Jakość."
+    },
+    "recommendation_raise_sensitivity": {
+      "title": "Żarówka prawie nie słyszy",
+      "description": "Zobacz Outglow → Jakość."
+    },
+    "recommendation_weak_coverage": {
+      "title": "Pokój {room} jest słabo pokryty",
+      "description": "Zobacz Outglow → Jakość."
+    },
+    "recommendation_more_empty_house": {
+      "title": "Kalibracja potrzebuje pustego domu",
+      "description": "Zobacz Outglow → Jakość."
+    },
+    "recommendation_frozen_direction": {
+      "title": "Kierunek zamrożony",
+      "description": "Zobacz Outglow → Jakość."
+    },
+    "recommendation_no_bulbs": {
+      "title": "Pokój {room} nie ma żarówek",
+      "description": "Przez pokój {room} nie przechodzi żadna linia, więc ruch jest w nim niewidoczny. Postaw w nim żarówkę albo między sąsiednimi pokojami. Zobacz Outglow → Jakość."
+    },
+    "recommendation_no_bulbs_rules": {
+      "title": "Pokój {room} nie ma żarówek",
+      "description": "Ruch w pokoju {room} widzą tylko linie przechodzące przez ten pokój, a tryb reguł nigdy nie zapala pokoju bez żarówek. Zobacz Outglow → Jakość."
+    },
+    "panel_conflict": {
+      "title": "Ścieżka /{path} w pasku bocznym jest zajęta",
+      "description": "Inny panel używa już /{path}, więc panelu Outglow nie ma w pasku bocznym. Usuń albo przemianuj tamten panel (np. wpis panel_custom lub panel_iframe w configuration.yaml) i przeładuj Outglow. Wykrywanie i encje działają bez panelu."
+    }
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "command": "outglow/settings/set",
+  "request": {
+    "rooms": {
+      "living": {
+        "false_alarm_budget": 1.0,
+        "reaction": "normal",
+        "hold_time_s": 60,
+        "auto_light": false,
+        "light_off_delay_s": 300
+      },
+      "hall": {
+        "false_alarm_budget": 1.0,
+        "reaction": "fast",
+        "hold_time_s": 90,
+        "auto_light": false,
+        "light_off_delay_s": 300
+      },
+      "office": {
+        "false_alarm_budget": 0.3,
+        "reaction": "normal",
+        "hold_time_s": 60,
+        "auto_light": false,
+        "light_off_delay_s": 300
+      }
+    },
+    "global": {
+      "sensing": true,
+      "learning": true,
+      "mode": "rules",
+      "tick_s": 0.5,
+      "use_persons": false,
+      "persons": [],
+      "others_may_be_home": false,
+      "quiet_background": false,
+      "firmware_channel": false,
+      "retention": {
+        "raw_h": 48,
+        "empty_raw_d": 7,
+        "ticks_d": 14,
+        "events_d": 365
+      }
+    }
+  },
+  "response": {
+    "rooms": {
+      "living": {
+        "false_alarm_budget": 1.0,
+        "reaction": "normal",
+        "hold_time_s": 60,
+        "auto_light": false,
+        "light_off_delay_s": 300
+      },
+      "hall": {
+        "false_alarm_budget": 1.0,
+        "reaction": "fast",
+        "hold_time_s": 90,
+        "auto_light": false,
+        "light_off_delay_s": 300
+      },
+      "office": {
+        "false_alarm_budget": 0.3,
+        "reaction": "normal",
+        "hold_time_s": 60,
+        "auto_light": false,
+        "light_off_delay_s": 300
+      }
+    },
+    "global": {
+      "sensing": true,
+      "learning": true,
+      "mode": "rules",
+      "tick_s": 0.5,
+      "use_persons": false,
+      "persons": [],
+      "others_may_be_home": false,
+      "quiet_background": false,
+      "firmware_channel": false,
+      "retention": {
+        "raw_h": 48,
+        "empty_raw_d": 7,
+        "ticks_d": 14,
+        "events_d": 365
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "outglow-ha-frontend",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config vite.mock.config.ts",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit && vitest run tests/no-comments.test.ts",
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "shots": "node scripts/shots.mjs"
+  },
+  "dependencies": {
+    "@mdi/js": "7.4.47",
+    "lit": "3.3.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "22.20.5",
+    "happy-dom": "21.0.4",
+    "typescript": "6.0.3",
+    "vite": "8.2.6",
+    "vitest": "5.1.0"
+  }
+}

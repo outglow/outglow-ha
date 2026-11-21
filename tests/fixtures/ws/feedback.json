@@ -1,0 +1,11 @@
+{
+  "command": "outglow/feedback",
+  "request": {
+    "room": "hall",
+    "kind": "false_alarm",
+    "when": 1800000004.0
+  },
+  "response": {
+    "pending_id": "p-0007-0001"
+  }
+}

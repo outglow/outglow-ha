@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bulb_write.json",
+  "title": "BulbWrite",
+  "description": "The only way to write to a bulb (architecture.md 9): preview, then write with the one-time token",
+  "$defs": {
+    "BulbSetting": {"enum": ["sensing", "sensitivity", "probes", "auto_calibration", "self_tuning", "calibrate"]},
+    "BulbValue": {"type": ["integer", "boolean", "string"]},
+    "BulbEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "params"],
+      "properties": {
+        "code": {"enum": ["overwrites_all_lines", "clears_calibration", "disables_auto_calibration", "more_radio_traffic", "stops_sensing", "starts_calibration"]},
+        "params": {"type": "object", "additionalProperties": {"$ref": "common.json#/$defs/Scalar"}}
+      }
+    },
+    "BulbWritePreviewRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ieee", "setting", "value"],
+      "properties": {
+        "ieee": {"$ref": "common.json#/$defs/Ieee"},
+        "setting": {"$ref": "#/$defs/BulbSetting"},
+        "value": {"$ref": "#/$defs/BulbValue"}
+      }
+    },
+    "BulbWritePreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["confirm_token", "expires", "previous", "effects"],
+      "properties": {
+        "confirm_token": {"type": "string"},
+        "expires": {"$ref": "common.json#/$defs/Timestamp"},
+        "previous": {"oneOf": [{"$ref": "#/$defs/BulbValue"}, {"type": "null"}]},
+        "effects": {"type": "array", "items": {"$ref": "#/$defs/BulbEffect"}}
+      }
+    },
+    "BulbWriteRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ieee", "setting", "value", "confirm_token"],
+      "properties": {
+        "ieee": {"$ref": "common.json#/$defs/Ieee"},
+        "setting": {"$ref": "#/$defs/BulbSetting"},
+        "value": {"$ref": "#/$defs/BulbValue"},
+        "confirm_token": {"type": "string"}
+      }
+    },
+    "BulbWriteResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["written", "t"],
+      "properties": {
+        "written": {"type": "boolean"},
+        "t": {"$ref": "common.json#/$defs/Timestamp"}
+      }
+    }
+  }
+}

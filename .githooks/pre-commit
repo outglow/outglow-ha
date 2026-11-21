@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+py=${PY:-.venv/bin/python}
+[ -x "$py" ] || py=python3
+fail=0
+log=$(mktemp)
+trap 'rm -f "$log"' EXIT
+step() {
+  name=$1
+  shift
+  if ! "$@" >"$log" 2>&1; then
+    echo "pre-commit: $name failed" >&2
+    cat "$log" >&2
+    fail=1
+  fi
+}
+step "README sections (tools/docs.py --check; fix: make docs)" "$py" tools/docs.py --check
+step "contracts (tools/contracts.py --check; fix: make docs)" "$py" tools/contracts.py --check
+step "ruff" "$py" -m ruff check --quiet .
+step "ruff format" "$py" -m ruff format --check --quiet .
+step "no comments, no private data (tests/test_repo.py)" "$py" -m pytest -q -x -p no:cacheprovider tests/test_repo.py tests/test_docs.py
+if [ -d frontend/node_modules ]; then
+  step "no comments in TypeScript" npx --prefix frontend vitest run --root frontend tests/no-comments.test.ts tests/help.test.ts
+fi
+if git diff --cached --name-only | grep -q '^frontend/src/'; then
+  echo "pre-commit: frontend/src changed; if it changes the look, refresh the README images: make docs-images" >&2
+fi
+exit $fail

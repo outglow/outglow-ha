@@ -1,0 +1,10 @@
+{
+  "command": "outglow/model/rollback",
+  "request": {
+    "snapshot_id": "m-0005"
+  },
+  "response": {
+    "model_version": 8,
+    "snapshot_id": "m-0008"
+  }
+}

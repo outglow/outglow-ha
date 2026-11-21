@@ -1,0 +1,309 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Zigbee2MQTT",
+        "description": "Outglow reads the motion reports of Outglow bulbs from Zigbee2MQTT over MQTT. Nothing is written to the bulbs.",
+        "data": {
+          "base_topic": "Base topic"
+        },
+        "data_description": {
+          "base_topic": "The base_topic of Zigbee2MQTT, usually zigbee2mqtt"
+        }
+      },
+      "summary": {
+        "title": "Outglow bulbs",
+        "description": "Bridge on {topic} answered. Zigbee2MQTT {version}. Found {bulbs} Outglow bulbs; motion sensing is on in {sensing}; activity reports are on in {reporting}.\n\nWithout activity reports (the device option motion_activity_rate above 0) Outglow sees only the bulbs' motion bits. Outglow does not change it for you: set it in Zigbee2MQTT if you want it. Motion tracking shows when someone moves in which room: tell the people you live with."
+      },
+      "no_bridge": {
+        "title": "Zigbee2MQTT did not answer on {topic}",
+        "description": "Nothing came from {topic}/bridge/devices within a few seconds. Check the base topic and that Zigbee2MQTT is running. You can add Outglow anyway; it starts working when the bridge appears.\n\nWithout activity reports (the device option motion_activity_rate above 0) Outglow sees only the bulbs' motion bits. Outglow does not change it for you: set it in Zigbee2MQTT if you want it. Motion tracking shows when someone moves in which room: tell the people you live with."
+      }
+    },
+    "error": {
+      "invalid_topic": "Give a topic without wildcards"
+    },
+    "abort": {
+      "already_configured": "Outglow is already set up for this topic",
+      "single_instance_allowed": "Outglow is already set up",
+      "mqtt_missing": "Set up the MQTT integration first"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Outglow",
+        "data": {
+          "log_level": "Log level"
+        },
+        "description": "Everything else is in the Outglow panel (Settings)."
+      }
+    }
+  },
+  "selector": {
+    "log_level": {
+      "options": {
+        "debug": "Debug",
+        "info": "Info",
+        "warning": "Warning"
+      }
+    },
+    "feedback_kind": {
+      "options": {
+        "false_alarm": "False alarm",
+        "missed": "Missed",
+        "correct": "Correct"
+      }
+    },
+    "label_activity": {
+      "options": {
+        "walk": "Walking",
+        "still": "Still",
+        "transition": "Going to the next room"
+      }
+    },
+    "bulb_setting": {
+      "options": {
+        "sensing": "Motion sensing",
+        "sensitivity": "Sensitivity",
+        "probes": "Probe rate",
+        "auto_calibration": "Automatic calibration",
+        "self_tuning": "Self-tuning",
+        "calibrate": "Calibrate"
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "occupancy": {
+        "name": "Occupancy"
+      },
+      "home_motion": {
+        "name": "Motion at home"
+      }
+    },
+    "sensor": {
+      "motion_room": {
+        "name": "Motion room",
+        "state": {
+          "none": "None"
+        }
+      },
+      "status": {
+        "name": "Status",
+        "state": {
+          "learning": "Learning",
+          "ready": "Ready",
+          "degraded": "Degraded",
+          "paused": "Paused"
+        }
+      },
+      "false_alarms_24h": {
+        "name": "False alarms (24 h)"
+      }
+    },
+    "switch": {
+      "sensing": {
+        "name": "Sensing"
+      },
+      "learning": {
+        "name": "Learning"
+      }
+    },
+    "select": {
+      "false_alarm_budget": {
+        "name": "False alarm budget"
+      },
+      "reaction": {
+        "name": "Reaction",
+        "state": {
+          "fast": "Fast",
+          "normal": "Normal",
+          "calm": "Calm"
+        }
+      }
+    },
+    "number": {
+      "hold_time": {
+        "name": "Hold time"
+      }
+    },
+    "button": {
+      "delete_motion_history": {
+        "name": "Delete motion history"
+      }
+    }
+  },
+  "services": {
+    "feedback": {
+      "name": "Feedback",
+      "description": "Tell Outglow a room's motion was a false alarm, missed or correct.",
+      "fields": {
+        "room": {
+          "name": "Room",
+          "description": "Room id or name of the plan"
+        },
+        "kind": {
+          "name": "Kind",
+          "description": "What was wrong or right"
+        },
+        "when": {
+          "name": "When",
+          "description": "Default: now"
+        }
+      }
+    },
+    "label": {
+      "name": "Label",
+      "description": "Label the last seconds: someone was in a room, or the home was empty.",
+      "fields": {
+        "room": {
+          "name": "Room",
+          "description": "Room id or name"
+        },
+        "empty": {
+          "name": "Empty",
+          "description": "Nobody was home"
+        },
+        "activity": {
+          "name": "Activity",
+          "description": "What the person did"
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "Seconds back from now"
+        }
+      }
+    },
+    "start_session": {
+      "name": "Start session",
+      "description": "Start a labelled learning session.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "Name of the session"
+        }
+      }
+    },
+    "stop_session": {
+      "name": "Stop session",
+      "description": "Stop the running learning session."
+    },
+    "export_recording": {
+      "name": "Export recording",
+      "description": "Write a JSONL recording to /config/outglow/exports. It shows who was in which room and when.",
+      "fields": {
+        "start": {
+          "name": "Start",
+          "description": "From"
+        },
+        "end": {
+          "name": "End",
+          "description": "Until"
+        },
+        "include_raw": {
+          "name": "Include raw reports",
+          "description": "The bulbs' reports, not only labels"
+        }
+      }
+    },
+    "reset_learning": {
+      "name": "Reset learning",
+      "description": "Return the model to its priors; a snapshot is taken first.",
+      "fields": {
+        "room": {
+          "name": "Room",
+          "description": "Not supported yet"
+        }
+      }
+    },
+    "write_bulb_setting": {
+      "name": "Write bulb setting",
+      "description": "Change a motion sensing setting in a bulb. A sensitivity overwrites every line of the bulb and clears its calibration.",
+      "fields": {
+        "bulb": {
+          "name": "Bulb",
+          "description": "IEEE address or Zigbee2MQTT name"
+        },
+        "setting": {
+          "name": "Setting",
+          "description": "Which setting"
+        },
+        "value": {
+          "name": "Value",
+          "description": "New value"
+        },
+        "confirm": {
+          "name": "Confirm",
+          "description": "Must be true"
+        }
+      }
+    }
+  },
+  "issues": {
+    "rates_not_restored": {
+      "title": "Activity rates not restored",
+      "description": "Outglow was removed or disabled while MQTT was unavailable, so {count} bulbs may still report at the raised session rate: {bulbs}. Home Assistant restores each of them once Zigbee2MQTT reports its options, and only while it is still at the raised rate (a rate you changed is left as it is). A failed attempt is repeated less often each time, now every {retry} min, at most every 30 min. After a restart, add or enable Outglow again (it restores them at start) or set motion_activity_rate for these bulbs in Zigbee2MQTT."
+    },
+    "output_attribute": {
+      "title": "Zigbee2MQTT sends attributes, not JSON",
+      "description": "Outglow needs advanced.output json (or attribute_and_json) in Zigbee2MQTT on {base_topic}."
+    },
+    "bridge_offline": {
+      "title": "Zigbee2MQTT is offline",
+      "description": "The bridge on {base_topic} reports offline; motion sensing waits."
+    },
+    "no_converter": {
+      "title": "Outglow converter missing",
+      "description": "{bulbs} Outglow bulbs do not show motion_links. Install outglow.mjs in Zigbee2MQTT."
+    },
+    "no_activity_reports": {
+      "title": "No activity reports from {bulb}",
+      "description": "{bulb} senses motion but sent no activity reports for a day. Set motion_activity_rate in Zigbee2MQTT."
+    },
+    "plan_incomplete": {
+      "title": "Plan is incomplete",
+      "description": "Sensing bulbs not on the plan: {bulbs}. Bulbs outside every room: {outside}."
+    },
+    "plan_missing": {
+      "title": "Draw the plan",
+      "description": "Open Outglow → Plan and draw the rooms and the bulbs."
+    },
+    "room_no_coverage": {
+      "title": "{room} is not covered",
+      "description": "No pair of bulbs sees motion in {room}; its occupancy is unavailable."
+    },
+    "recommendation_skip_direction": {
+      "title": "A direction is noisy",
+      "description": "See Outglow → Quality."
+    },
+    "recommendation_raise_sensitivity": {
+      "title": "A bulb is almost deaf",
+      "description": "See Outglow → Quality."
+    },
+    "recommendation_weak_coverage": {
+      "title": "{room} is weakly covered",
+      "description": "See Outglow → Quality."
+    },
+    "recommendation_more_empty_house": {
+      "title": "Calibration needs an empty home",
+      "description": "See Outglow → Quality."
+    },
+    "recommendation_frozen_direction": {
+      "title": "A direction is frozen",
+      "description": "See Outglow → Quality."
+    },
+    "recommendation_no_bulbs": {
+      "title": "{room} has no bulbs",
+      "description": "No line crosses {room}, so motion there stays invisible. Put a bulb in it or between its neighbours. See Outglow → Quality."
+    },
+    "recommendation_no_bulbs_rules": {
+      "title": "{room} has no bulbs",
+      "description": "Only lines crossing {room} can see motion there, and rules mode never lights a room without bulbs. See Outglow → Quality."
+    },
+    "panel_conflict": {
+      "title": "The sidebar path /{path} is taken",
+      "description": "Another panel already uses /{path}, so the Outglow panel is not in the sidebar. Remove or rename that panel (for example a panel_custom or panel_iframe entry in configuration.yaml) and reload Outglow. Sensing and the entities work without the panel."
+    }
+  }
+}

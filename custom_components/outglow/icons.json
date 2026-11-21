@@ -1,0 +1,18 @@
+{
+  "entity": {
+    "sensor": {"motion_room": {"default": "mdi:home-search"}, "status": {"default": "mdi:motion-sensor"}, "false_alarms_24h": {"default": "mdi:alert-circle-outline"}},
+    "switch": {"sensing": {"default": "mdi:motion-sensor"}, "learning": {"default": "mdi:school"}},
+    "select": {"false_alarm_budget": {"default": "mdi:scale-balance"}, "reaction": {"default": "mdi:speedometer"}},
+    "number": {"hold_time": {"default": "mdi:timer-sand"}},
+    "button": {"delete_motion_history": {"default": "mdi:delete-clock"}}
+  },
+  "services": {
+    "feedback": {"service": "mdi:message-alert"},
+    "label": {"service": "mdi:tag"},
+    "start_session": {"service": "mdi:play"},
+    "stop_session": {"service": "mdi:stop"},
+    "export_recording": {"service": "mdi:export"},
+    "reset_learning": {"service": "mdi:restore"},
+    "write_bulb_setting": {"service": "mdi:lightbulb-on"}
+  }
+}

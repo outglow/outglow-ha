@@ -1,0 +1,14 @@
+{
+  "command": "outglow/plan/valetudo/robots",
+  "request": {},
+  "response": {
+    "url": "http://192.0.2.10",
+    "robots": [
+      {
+        "id": "Robot1",
+        "name": "Valetudo Robot",
+        "url": "http://valetudo-robot1.local"
+      }
+    ]
+  }
+}
