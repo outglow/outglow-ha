@@ -45,6 +45,7 @@ jobs:
         working-directory: frontend
         run: npx playwright test
       - name: README images are up to date
+        if: ${{ !cancelled() }}
         working-directory: frontend
         run: node scripts/shots.mjs --check
       - if: failure()
