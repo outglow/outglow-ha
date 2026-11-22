@@ -36,8 +36,10 @@ async def test_nothing_is_published_without_an_explicit_write(
         request = ws_fixture(command)["request"]
         if command == "outglow/session/start":
             request = {**request, "raise_rate": False}
-        await ws.send_json_auto_id({"type": command, **request})
-        await ws.receive_json()
+        message = {"type": command, **request}
+        await ws.send_json_auto_id(message)
+        while (reply := await ws.receive_json())["type"] != "result" or reply["id"] != message["id"]:
+            continue
     await hass.services.async_call(DOMAIN, "feedback", {"room": "living", "kind": "false_alarm"}, blocking=True)
     await hass.services.async_call(DOMAIN, "label", {"room": "hall", "activity": "walk"}, blocking=True)
     await hass.services.async_call(DOMAIN, "start_session", {"name": "x"}, blocking=True)

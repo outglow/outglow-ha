@@ -41,7 +41,18 @@ def test_mieszkanie_import_with_warnings() -> None:
     assert ("unknown_bulb", {"name": "E"}) in codes
     assert ("bulb_outside_rooms", {"bulb": B3}) in codes
     assert ("dropped_field", {"field": "rooms.store.outline"}) in codes
-    assert ("overlapping_rooms", {"a": "living", "b": "nook"}) in codes
+    assert "overlapping_rooms" not in [code for code, _ in codes]
+
+
+def test_mieszkanie_import_warns_about_rooms_that_overlap_in_part_only() -> None:
+    rooms = {
+        "ell": {"outline": [[0, 0], [4, 0], [4, 1], [1, 1], [1, 4], [0, 4]]},
+        "corner": {"outline": [[1, 1], [4, 1], [4, 4], [1, 4]]},
+        "closet": {"outline": [[0, 0], [1, 0], [1, 1], [0, 1]]},
+        "porch": {"outline": [[3, 3], [6, 3], [6, 6], [3, 6]]},
+    }
+    warnings = importer.from_mieszkanie({"rooms": rooms}).warnings
+    assert [w["params"] for w in warnings if w["code"] == "overlapping_rooms"] == [{"a": "corner", "b": "porch"}]
 
 
 def test_layout_import_and_skip_list() -> None:

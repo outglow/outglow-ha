@@ -130,6 +130,11 @@ def information(p: PairParams, room: str) -> float:
     return sum(x * math.log(x / y) for x, y in zip(on, off, strict=True))
 
 
+def _columns(p: PairParams, states: tuple[State, ...], binary: bool) -> list[list[float]]:
+    rows = [probabilities(p, s, binary) for s in states]
+    return [[math.log(row[c]) for row in rows] for c in range(CODES)]
+
+
 class Emission:
     def __init__(
         self, topo: Topology, pair_params: dict[Pair, PairParams], states: tuple[State, ...], binary: bool = False
@@ -137,10 +142,7 @@ class Emission:
         self.pairs = topo.pairs
         self.params = pair_params
         self.states = states
-        self._cols = {
-            pair: [[math.log(probabilities(pair_params[pair], s, binary)[c]) for s in states] for c in range(CODES)]
-            for pair in topo.pairs
-        }
+        self._cols = {pair: _columns(pair_params[pair], states, binary) for pair in topo.pairs}
         self._cache: dict[tuple[int | None, ...], list[float]] = {}
 
     def loglik(self, codes: tuple[int | None, ...]) -> list[float]:

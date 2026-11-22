@@ -26,6 +26,7 @@ from .const import (
     CALIBRATION_MINUTE,
     CONF_BASE_TOPIC,
     DATA_DIR,
+    DERIVE_TRIES,
     DOMAIN,
     FALSE_ALARM_WINDOW_S,
     FEEDBACK_DEFAULT_S,
@@ -44,7 +45,8 @@ from .const import (
 )
 from .context import ContextTracker, EmptyInterval, HouseState
 from .engine import Engine, from_json, to_json
-from .engine.core import Carry
+from .engine.core import Carry, Derived, ModelCopy
+from .engine.model import Model
 from .engine.types import (
     CalibrationResult,
     Context,
@@ -72,7 +74,7 @@ from .history import History
 from .learning import ModelBook, SnapshotReason
 from .live import frame_delta
 from .mqtt_source import MqttSource
-from .plan_import import bulb_room
+from .plan_import import bulb_room, excess
 from .session import SessionManager
 from .store import OutglowStore
 from .z2m import BulbWriter, Z2MDevices
@@ -82,6 +84,7 @@ TIMING_KEPT = 1000
 HOUR_S = 3600.0
 CLOCK: Callable[[], float] = time.time
 DAY_S = 86400.0
+MODEL_SAVE_TRIES = 3
 
 
 @dataclass(slots=True)
@@ -107,6 +110,8 @@ class OutglowCoordinator:
         self.house = HouseState()
         self.sessions = SessionManager(self)
         self.plan = Plan()
+        self.plan_copy: str | None = None
+        self.plan_problem: str | None = None
         self.settings = Settings()
         self.model = ModelBook({"engine": None, "seq": 0}, [])
         self.engine = Engine(self.plan, self.settings)
@@ -135,6 +140,7 @@ class OutglowCoordinator:
         self.rolling_back: str | None = None
         self._engine_lock = asyncio.Lock()
         self._held: list[str] = []
+        self._model_saves = 0
 
     def now(self) -> float:
         return self.clock()
@@ -142,13 +148,16 @@ class OutglowCoordinator:
     async def async_setup(self, carry_on: bool = False) -> None:
         self.started = self.now()
         await self.hass.async_add_executor_job(self.history.open)
-        self.plan = await self.store.async_load_plan()
+        self.plan, self.plan_copy = await self.store.async_load_plan()
+        self.plan_problem = excess(self.plan)
         self.settings = self._complete_settings(await self.store.async_load_settings())
         self.model = ModelBook(await self.store.async_load_model(), await self.store.async_load_snapshots())
         self.sessions.load(await self.store.async_load_runtime())
         self.model.observe_id(self.sessions.session["session_id"] if self.sessions.session else None)
+        self.engine = await self.hass.async_add_executor_job(
+            Engine, self.engine_plan(), self.engine_settings(), self.model.engine_state()
+        )
         self._loaded = True
-        self.engine = Engine(self.plan, self.settings, self.model.engine_state())
         self.engine.context(self._context(self.now()))
         events = await self.hass.async_add_executor_job(
             self.history.events, self.started - FALSE_ALARM_WINDOW_S, self.started, ["false_alarm"]
@@ -167,6 +176,7 @@ class OutglowCoordinator:
         )
         self._unsubs.append(self.hass.bus.async_listen(EVENT_HOMEASSISTANT_STOP, self._async_on_stop))
         self._track_persons()
+        self._remove_rooms(self._orphan_rooms() & set(self.plan.retired_rooms))
         self._sync_room_devices({})
         left = await leftover.async_peek(self.hass, self.base_topic)
         if left:
@@ -174,10 +184,15 @@ class OutglowCoordinator:
             await self.async_save_runtime()
             await leftover.async_forget(self.hass, self.base_topic)
         await leftover.async_forget(self.hass, self.base_topic, others=True)
+        self.sessions.follow()
         await self.sessions.async_resume(carry_on)
         repairs.update(self)
 
     async def async_unload(self, keep_session: bool = False) -> None:
+        async with self._engine_lock:
+            await self._async_unload(keep_session)
+
+    async def _async_unload(self, keep_session: bool) -> None:
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
@@ -211,9 +226,10 @@ class OutglowCoordinator:
         await self.store.async_save_snapshots(self.model.snapshots)
         await self.async_save_runtime()
 
-    def _complete_settings(self, settings: Settings, plan: Plan | None = None) -> Settings:
+    def _complete_settings(self, settings: Settings, plan: Plan | None = None, keep: bool = True) -> Settings:
         rooms = {room.id: settings.rooms.get(room.id, RoomSettings()) for room in (plan or self.plan).rooms}
-        return replace(settings, rooms=rooms)
+        spare = {**self.settings.rooms, **settings.rooms} if keep and self.plan_copy is not None else {}
+        return replace(settings, rooms={**spare, **rooms})
 
     @property
     def model_version(self) -> int:
@@ -223,16 +239,32 @@ class OutglowCoordinator:
     def model_summary(self) -> dict[str, Any]:
         return self.engine.summary()
 
-    def active_model(self) -> dict[str, Json]:
-        return {"active": self.engine.model_state()["active"]}
+    async def async_active_model(self) -> dict[str, Json]:
+        return await self.hass.async_add_executor_job(self.engine.model_copy().active_state)
+
+    def _model_data(self) -> Callable[[], dict[str, Any]]:
+        self._model_saves += 1
+        book = dict(self.model.book)
+        copy = self.engine.model_copy()
+        return lambda: {**book, "engine": copy.state()}
 
     async def async_save_model(self) -> None:
-        self.model.book["engine"] = self.engine.model_state()
-        await self.store.async_save_model(self.model.book)
+        for _ in range(MODEL_SAVE_TRIES):
+            data = self._model_data()
+            turn = self._model_saves
+            saved = await self.hass.async_add_executor_job(data)
+            if turn == self._model_saves:
+                await self.store.async_save_model(saved)
+                return
 
     def schedule_save_model(self) -> None:
-        self.model.book["engine"] = self.engine.model_state()
-        self.store.schedule_model(self.model.book)
+        self.store.schedule_model(self._model_data())
+
+    def engine_plan(self) -> Plan:
+        return Plan(rev=self.plan.rev) if self.plan_problem is not None else self.plan
+
+    def engine_settings(self) -> Settings:
+        return _engine_settings(self.settings, self.plan_problem)
 
     def _context(self, t: float) -> Context:
         return Context(
@@ -240,6 +272,7 @@ class OutglowCoordinator:
             persons_home=self.house.persons_home,
             house_empty=self.house_empty,
             offline=self.devices.offline(),
+            cfar=self.devices.cfar(),
         )
 
     def _schedule_tick(self) -> None:
@@ -364,10 +397,17 @@ class OutglowCoordinator:
         self._bridge_up = self.devices.bridge_online
         self._map_lights()
         self.engine.context(self._context(self.now()))
+        self.sessions.bridge_changed()
         repairs.update(self)
         self._notify()
 
     def availability_changed(self, ieee: str, online: bool) -> None:
+        self._context_changed()
+
+    def detector_changed(self, ieee: str) -> None:
+        self._context_changed()
+
+    def _context_changed(self) -> None:
         ctx = self._context(self.now())
         self.engine.context(ctx)
         if self.settings.global_.sensing:
@@ -452,13 +492,7 @@ class OutglowCoordinator:
             elif previous in ("yes", "soft"):
                 self.event("house_occupied", None, {}, t)
         for interval in closed:
-            self.hass.async_create_task(self._async_empty_interval(interval))
-
-    async def _async_empty_interval(self, interval: EmptyInterval) -> None:
-        await self.async_copy_empty(interval.t0, interval.t1)
-        weight = LABEL_WEIGHTS["empty_house_soft" if interval.soft else "empty_house"]
-        label = Label(t0=interval.t0, t1=interval.t1, kind="empty", source="empty_house", weight=weight)
-        await self.async_add_labels([label], background=True)
+            self.hass.async_create_task(self.async_copy_empty(interval.t0, interval.t1))
 
     async def async_copy_empty(self, t0: float, t1: float) -> None:
         if t1 <= t0:
@@ -531,7 +565,9 @@ class OutglowCoordinator:
 
     async def async_calibrate(self) -> CalibrationResult:
         t = self.now()
-        with self.holding(self.snapshot("daily", t)):
+        if self.plan_problem is not None:
+            return CalibrationResult(t=t, rooms={})
+        with self.holding(await self.async_snapshot("daily", t)):
             return await self._async_calibrate(t)
 
     async def _async_calibrate(self, t: float) -> CalibrationResult:
@@ -541,7 +577,9 @@ class OutglowCoordinator:
         await self.async_flush_history()
         t0 = t - CALIBRATION_DAYS * DAY_S
         spans = await self.hass.async_add_executor_job(self.history.empty_spans, t0, t)
-        trial = Engine(self.plan, self.settings, self.engine.model_state())
+        trial = await self.hass.async_add_executor_job(
+            _trial, self.engine_plan(), self.settings, self.engine.model_copy()
+        )
         samples = self.history.iter_observations(t0, t, "empty_raw")
         result = await self.hass.async_add_executor_job(trial.calibrate, samples, t, spans)
         async with self._engine_lock:
@@ -574,8 +612,10 @@ class OutglowCoordinator:
             for item in held:
                 self._held.remove(item)
 
-    def snapshot(self, reason: SnapshotReason, now: float) -> str:
-        snapshot_id = self.model.snapshot(reason, now, self.model_version, self.engine.model_state()["active"])
+    async def async_snapshot(self, reason: SnapshotReason, now: float, mode: Mode | None = None) -> str:
+        version = self.model_version
+        active = await self.hass.async_add_executor_job(self.engine.model_copy().active_state)
+        snapshot_id = self.model.snapshot(reason, now, version, active["active"], mode)
         self.hass.async_create_task(self.store.async_save_snapshots(self.model.snapshots))
         self.schedule_save_model()
         return snapshot_id
@@ -588,7 +628,7 @@ class OutglowCoordinator:
         labels = [label for label in labels if label not in orphans]
         if not labels:
             return None
-        if background and not self.settings.global_.learning:
+        if self.plan_problem is not None or (background and not self.settings.global_.learning):
             await self.hass.async_add_executor_job(self.history.add_labels, labels, "discarded", None)
             return None
         pending_id = ""
@@ -612,6 +652,15 @@ class OutglowCoordinator:
         if pending_id is not None:
             await self.hass.async_add_executor_job(self.history.set_label_status, pending_id, "discarded")
 
+    async def _async_follow_pending(self, before: str | None) -> None:
+        after = self.engine.pending_id()
+        if before is None or before == after:
+            return
+        if after is None:
+            await self.hass.async_add_executor_job(self.history.set_label_status, before, "discarded")
+        else:
+            await self.hass.async_add_executor_job(self.history.move_pending, before, after)
+
     async def async_apply(self, pending_id: str, mode: Mode | None = None) -> dict[str, Any]:
         async with self._engine_lock:
             return await self._async_apply(pending_id, mode)
@@ -620,8 +669,18 @@ class OutglowCoordinator:
         if pending_id != self.engine.pending_id():
             raise OutglowError("not_found", "No such proposal")
         t = self.now()
-        with self.holding(self.snapshot("before_apply", t)) as snapshot_id:
-            version = self.engine.apply(pending_id, t)
+        current = self.settings.global_.mode
+        switch = current if mode not in (None, current) else None
+        with self.holding(await self.async_snapshot("before_apply", t, switch)) as snapshot_id:
+            engine = self.engine
+            engine.hold_background()
+            try:
+                ready = await self._async_derive_pending()
+                if pending_id != engine.pending_id():
+                    raise OutglowError("not_found", "No such proposal")
+                version = engine.apply(pending_id, t, ready)
+            finally:
+                engine.release_background()
             await self.async_save_model()
             await self.hass.async_add_executor_job(self.history.set_label_status, pending_id, "applied")
         self.event("model_apply", None, {"pending_id": pending_id, "model_version": version})
@@ -645,17 +704,27 @@ class OutglowCoordinator:
         return {"model_version": self.model_version, "snapshot_id": None}
 
     async def async_rollback(self, snapshot_id: str) -> dict[str, Any]:
-        target = self.model.find_snapshot(snapshot_id)
+        target, mode = self.model.find_snapshot(snapshot_id)
         if self.rolling_back is not None:
             raise OutglowError("busy", "A rollback is running")
         self.rolling_back = snapshot_id
         try:
             async with self._engine_lock:
                 t = self.now()
-                with self.holding(self.snapshot("before_rollback", t)) as before:
+                current = self.settings.global_.mode
+                switch = mode if mode not in (None, current) else None
+                with self.holding(
+                    await self.async_snapshot("before_rollback", t, current if switch else None)
+                ) as before:
+                    weak = self.engine.weak_pairs()
+                    ready = await self.hass.async_add_executor_job(self.engine.derive_state, target, weak)
                     await self._async_drop_pending()
-                    version = self.engine.restore(target, t)
+                    version = self.engine.restore(target, t, ready)
                     await self.async_save_model()
+                if switch is not None:
+                    await self._async_set_settings(
+                        replace(self.settings, global_=replace(self.settings.global_, mode=switch))
+                    )
         finally:
             self.rolling_back = None
         self.event("model_rollback", None, {"snapshot_id": snapshot_id, "model_version": version})
@@ -664,8 +733,11 @@ class OutglowCoordinator:
 
     async def async_delete_snapshots(self, snapshot_id: str | None) -> list[dict[str, Any]]:
         held = {*self._held, *([self.rolling_back] if self.rolling_back is not None else [])}
+        count = len(self.model.snapshots)
         self.model.delete(snapshot_id, held)
         await self.store.async_save_snapshots(self.model.snapshots)
+        target: dict[str, Scalar] = {"all": True} if snapshot_id is None else {"snapshot_id": snapshot_id}
+        self.event("snapshot_delete", None, {**target, "deleted": count - len(self.model.snapshots)})
         self._notify()
         return self.model.snapshot_list()
 
@@ -675,53 +747,88 @@ class OutglowCoordinator:
 
     async def _async_reset_learning(self, room: str | None) -> dict[str, Any]:
         t = self.now()
-        with self.holding(self.snapshot("before_reset", t)) as before:
+        with self.holding(await self.async_snapshot("before_reset", t)) as before:
+            ready = await self._async_derive(self.engine.reset_model(room))
             if room is None:
                 await self._async_drop_pending()
-            version = self.engine.reset(t, room)
+            pending_id = self.engine.pending_id()
+            version = self.engine.reset(t, room, ready)
+            await self._async_follow_pending(pending_id)
             await self.async_save_model()
+        self.event("model_reset", room, {"room": room, "model_version": version, "snapshot_id": before})
         self._notify()
         return {"model_version": version, "snapshot_id": before}
 
-    async def async_save_plan(self, rev: int, plan: Plan) -> int:
-        async with self._engine_lock:
-            return await self._async_save_plan(rev, plan)
+    async def _async_derive(self, model: Model | None) -> Derived | None:
+        if model is None:
+            return None
+        return await self.hass.async_add_executor_job(self.engine.derive, model, self.engine.weak_pairs())
 
-    async def _async_save_plan(self, rev: int, plan: Plan) -> int:
+    async def _async_derive_pending(self) -> Derived | None:
+        ready = None
+        for _ in range(DERIVE_TRIES):
+            ready = await self._async_derive(self.engine.pending_model())
+            if ready is None or self.engine.pending_fits(ready):
+                break
+        return ready
+
+    async def async_save_plan(self, rev: int, plan: Plan, resolve: bool = False) -> Plan:
+        async with self._engine_lock:
+            return await self._async_save_plan(rev, plan, resolve)
+
+    async def async_known_rooms(self) -> set[str]:
+        if self.plan_copy is None:
+            return set()
+        history = await self.hass.async_add_executor_job(self.history.rooms)
+        found = self._orphan_rooms() | set(self.settings.rooms) | self.engine.foreign_rooms() | history
+        return found - {room.id for room in self.plan.rooms} - set(self.plan.retired_rooms)
+
+    async def _async_save_plan(self, rev: int, plan: Plan, resolve: bool = False) -> Plan:
         if rev != self.plan.rev:
             raise OutglowError("rev_conflict", "The plan was saved elsewhere; reload it")
         ids = {room.id for room in plan.rooms}
         reused = sorted(ids & set(self.plan.retired_rooms))
         if reused:
             raise OutglowError("invalid_format", f"Room id {reused[0]} belonged to a removed room")
-        removed = {room.id for room in self.plan.rooms} - ids
+        recovered = self.plan_copy is not None and (resolve or bool(plan.rooms))
+        known = await self.async_known_rooms() if recovered else set()
+        removed = ({room.id for room in self.plan.rooms} | known) - ids
         before = {room.id: room for room in self.plan.rooms}
         retired = tuple(sorted({*self.plan.retired_rooms, *plan.retired_rooms, *removed}))
         saved = replace(plan, rev=rev + 1, retired_rooms=retired)
-        settings = self._complete_settings(self.settings, saved)
+        settings = self._complete_settings(self.settings, saved, keep=not recovered)
+        problem = excess(saved)
         old = self.engine
-        fresh, stale = await self.hass.async_add_executor_job(_successor, old.carry(), saved, settings)
+        fresh, stale = await self.hass.async_add_executor_job(
+            _successor,
+            old.carry(),
+            saved if problem is None else Plan(rev=saved.rev),
+            _engine_settings(settings, problem),
+        )
         await self.store.async_save_plan(saved)
+        if recovered:
+            await self.store.async_resolve_copy()
+            self.plan_copy = None
         held = self.model.snapshot("before_reset", self.now(), self.model_version, stale) if stale else None
         with self.holding(held):
             pending_id = old.pending_id()
-            self.plan, self.settings = saved, settings
-            self.engine = fresh.inherit(old)
+            self.plan, self.settings, self.plan_problem = saved, settings, problem
+            self.engine = fresh.inherit(old, self.now())
             self.engine.context(self._context(self.now()))
             await self.store.async_save_settings(self.settings)
             if held is not None:
                 await self.store.async_save_snapshots(self.model.snapshots)
             if removed:
                 await self.hass.async_add_executor_job(self.history.discard_rooms, sorted(removed))
-            if pending_id is not None and self.engine.pending_id() is None:
-                await self.hass.async_add_executor_job(self.history.set_label_status, pending_id, "discarded")
+            await self._async_follow_pending(pending_id)
+            if held is not None or pending_id != self.engine.pending_id():
                 await self.async_save_model()
         self._remove_rooms(removed)
         self._sync_room_devices(before)
         async_dispatcher_send(self.hass, f"{SIGNAL_PLAN}_{self.entry.entry_id}")
         repairs.update(self)
         self.tick()
-        return self.plan.rev
+        return saved
 
     def _sync_room_devices(self, before: dict[str, Room]) -> None:
         dev_reg = dr.async_get(self.hass)
@@ -745,6 +852,24 @@ class OutglowCoordinator:
             area = areas.async_get_area(room.area_id) if room.area_id is not None else None
             if area is not None and (moved or device.area_id is None):
                 dev_reg.async_update_device(device.id, area_id=area.id)
+
+    def _orphan_rooms(self) -> set[str]:
+        prefix = f"{self.entry.entry_id}_"
+        suffixes = tuple(f"_{key}" for key in ROOM_KEYS)
+        ids = [e.unique_id for e in er.async_entries_for_config_entry(er.async_get(self.hass), self.entry.entry_id)]
+        rooms = {
+            next(uid.removeprefix(prefix).removesuffix(s) for s in suffixes if uid.endswith(s))
+            for uid in ids
+            if uid.startswith(prefix) and uid.endswith(suffixes)
+        }
+        devices = dr.async_entries_for_config_entry(dr.async_get(self.hass), self.entry.entry_id)
+        rooms |= {
+            item.removeprefix(prefix)
+            for device in devices
+            for domain, item in device.identifiers
+            if domain == DOMAIN and item.startswith(prefix)
+        }
+        return rooms - {room.id for room in self.plan.rooms} - {""}
 
     def _remove_rooms(self, rooms: set[str]) -> None:
         if not rooms:
@@ -771,7 +896,7 @@ class OutglowCoordinator:
         old = self.settings
         self.settings = self._complete_settings(settings)
         await self.store.async_save_settings(self.settings)
-        self.engine.reconfigure(self.settings)
+        self.engine.reconfigure(self.engine_settings())
         if old.global_.tick_s != self.settings.global_.tick_s:
             self._schedule_tick()
         self._track_persons()
@@ -845,6 +970,7 @@ class OutglowCoordinator:
                     "model": device.model,
                     "available": device.available,
                     "sensing": self.devices.sensing(device),
+                    "detector": self.devices.detector(device),
                     "probes": _number(state.get("motion_probes")),
                     "activity_rate": self.devices.activity_rate(device.ieee),
                     "sensitivity": _number(state.get("motion_sensitivity")),
@@ -864,6 +990,16 @@ class OutglowCoordinator:
 
     def decode_settings(self, data: object) -> Settings:
         return from_json(Settings, data)
+
+
+def _engine_settings(settings: Settings, problem: str | None) -> Settings:
+    if problem is None:
+        return settings
+    return replace(settings, global_=replace(settings.global_, learning=False))
+
+
+def _trial(plan: Plan, settings: Settings, copy: ModelCopy) -> Engine:
+    return Engine(plan, settings, copy.state())
 
 
 def _successor(carry: Carry, plan: Plan, settings: Settings) -> tuple[Engine, dict[str, Json] | None]:

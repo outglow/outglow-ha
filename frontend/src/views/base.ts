@@ -103,7 +103,7 @@ export class ViewBase extends LitElement {
     const next: Plan = { ...plan, excluded_directions: excluded ? [...rest, { rx, tx, reason }] : rest };
     try {
       const result = await this.call("outglow/plan/save", { rev: this.rev, plan: next });
-      this.planSaved({ ...next, rev: result.rev }, result.rev);
+      this.planSaved({ ...next, rev: result.rev, retired_rooms: result.retired_rooms }, result.rev);
       return true;
     } catch (err) {
       this.fail(err);

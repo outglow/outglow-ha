@@ -10,7 +10,7 @@
     "version": {"const": 1},
     "rev": {"type": "integer", "minimum": 0, "description": "Revision, raised by every save"},
     "floor_id": {"type": ["string", "null"]},
-    "north_deg": {"type": "number"},
+    "north_deg": {"type": "number", "description": "Direction of north on the plan, degrees clockwise from up (-y)"},
     "view_rotation_deg": {"type": "number"},
     "background": {"oneOf": [{"$ref": "#/$defs/Background"}, {"type": "null"}]},
     "rooms": {"type": "array", "items": {"$ref": "#/$defs/Room"}},
@@ -38,7 +38,7 @@
       "additionalProperties": false,
       "required": ["file", "x", "y", "m_per_px", "opacity"],
       "properties": {
-        "file": {"type": "string", "pattern": "^plan(-[0-9a-f]{16})?\\.(png|jpg|webp|svg)$", "description": "File name under /config/outglow, served only over the websocket; plan-<hash>.<ext> for images stored by outglow/plan/save"},
+        "file": {"type": "string", "pattern": "^plan(-[0-9a-f]{16})?\\.(png|jpg|webp|svg)$", "description": "File name under /config/outglow, served only over the websocket; plan-<hash>.<ext>, the hash of the picture, for images stored by outglow/plan/save and for the background of an imported map"},
         "x": {"type": "number"},
         "y": {"type": "number"},
         "m_per_px": {"type": "number", "exclusiveMinimum": 0},
@@ -104,10 +104,15 @@
     "PlanGetResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["rev", "plan"],
+      "required": ["rev", "plan", "reserved_rooms"],
       "properties": {
         "rev": {"type": "integer", "minimum": 0},
-        "plan": {"$ref": "#"}
+        "plan": {"$ref": "#"},
+        "reserved_rooms": {
+          "type": "array",
+          "items": {"$ref": "common.json#/$defs/RoomId"},
+          "description": "While the stored plan is unreadable: ids of the old rooms Home Assistant still knows; a new room never takes one, an imported room keeps it"
+        }
       }
     },
     "PlanSaveRequest": {
@@ -123,11 +128,16 @@
     "PlanSaveResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["rev", "warnings", "background"],
+      "required": ["rev", "warnings", "background", "retired_rooms"],
       "properties": {
         "rev": {"type": "integer", "minimum": 0},
         "warnings": {"type": "array", "items": {"$ref": "#/$defs/PlanWarning"}, "description": "Saved anyway; for now only bulb_pinned_elsewhere"},
-        "background": {"oneOf": [{"$ref": "#/$defs/Background"}, {"type": "null"}], "description": "plan.background as stored: the new file name, or null when the plan pointed at a file that is gone"}
+        "background": {"oneOf": [{"$ref": "#/$defs/Background"}, {"type": "null"}], "description": "plan.background as stored: the new file name, or null when the plan pointed at a file that is gone"},
+        "retired_rooms": {
+          "type": "array",
+          "items": {"$ref": "common.json#/$defs/RoomId"},
+          "description": "Every retired room id after this save, including the rooms this save removed"
+        }
       }
     },
     "BackgroundUpload": {
@@ -150,7 +160,7 @@
       "properties": {
         "format": {"$ref": "#/$defs/PlanImportFormat"},
         "text": {"type": "string", "maxLength": 16777216},
-        "deflated_base64": {"type": "string", "description": "The text deflated (zlib) and in base64, for files that would not fit the 4 MiB message limit; at most 16 MiB inflated"},
+        "deflated_base64": {"type": "string", "description": "The text deflated (zlib) and in base64, for files that would not fit the 4 MiB message limit; a whole zlib stream with nothing after it, at most 16 MiB inflated, and only a Valetudo map may be over 512 KiB"},
         "current": {"oneOf": [{"$ref": "#"}, {"type": "null"}], "description": "The plan in the editor, to keep its bulbs; ignored for an Outglow plan, which is taken as it is. From the current plan come its bulbs (unless the file places them), excluded directions, floor, north and view rotation, and the id of each room matched by id or name; a Valetudo map, which holds no more than outlines and names, also takes the matched rooms' names, colours, areas and entrance flags"}
       }
     },
@@ -171,8 +181,8 @@
       "properties": {
         "bulbs": {"type": "integer", "minimum": 0},
         "rooms": {"type": "integer", "minimum": 0, "description": "Rooms matched by id or name; from two on their centres fit a rigid move (both plans are in metres)"},
-        "aligned": {"type": "boolean", "description": "False below two matched rooms: the bulbs keep their coordinates (warning bulbs_not_aligned)"},
-        "rotation_deg": {"type": "number", "description": "Turn of the imported rooms against the current ones; view_rotation_deg is turned back by it and north_deg with it"},
+        "aligned": {"type": "boolean", "description": "False below three matched rooms: the bulbs keep their coordinates (warning bulbs_not_aligned)"},
+        "rotation_deg": {"type": "number", "description": "Turn of the imported rooms against the current ones; view_rotation_deg is turned back by it and north_deg with it; when mirrored, north_deg becomes 180 + rotation_deg - north_deg and view_rotation_deg stays"},
         "mirrored": {"type": "boolean", "description": "Only from three rooms not in a line and when the mirrored fit is at least twice as close"},
         "rms_m": {"type": ["number", "null"], "description": "Mismatch of the room centres after the move; null below two rooms"}
       }
@@ -229,8 +239,11 @@
     "BackgroundGetResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["image"],
-      "properties": {"image": {"oneOf": [{"$ref": "#/$defs/BackgroundImage"}, {"type": "null"}]}}
+      "required": ["image", "file"],
+      "properties": {
+        "image": {"oneOf": [{"$ref": "#/$defs/BackgroundImage"}, {"type": "null"}]},
+        "file": {"type": ["string", "null"], "description": "The stored file the image was read from, so a client caching by plan.background.file can tell a newer one"}
+      }
     },
     "BackgroundSetResponse": {
       "type": "object",

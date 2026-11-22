@@ -10,6 +10,7 @@ export interface OpenOptions {
   height?: number;
   latency?: number;
   reducedMotion?: boolean;
+  reserved?: string[];
 }
 
 export async function open(page: Page, path: string, options: OpenOptions = {}): Promise<void> {
@@ -23,6 +24,7 @@ export async function open(page: Page, path: string, options: OpenOptions = {}):
     lang: options.lang ?? "en",
     shot: "1",
     latency: String(options.latency ?? 20),
+    ...(options.reserved ? { reserved: options.reserved.join(",") } : {}),
   });
   await page.goto(`/outglow${path}?${params}`);
   await page.locator("outglow-panel main").waitFor();

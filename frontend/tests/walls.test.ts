@@ -20,7 +20,7 @@ import {
   wallSelection,
   type Selection,
 } from "../src/editor/ops";
-import { bulbRoom, doorCentre, offsetEdges, pairKey, project, rectangle, validate, wallPairs } from "../src/geometry";
+import { bulbRoom, doorCentre, offsetEdges, pairKey, project, rectangle, validate, wallPairs, wallRooms } from "../src/geometry";
 import { MOCK_PLAN } from "../mock/backend";
 
 function room(id: string, outline: Point[]): Room {
@@ -418,4 +418,118 @@ describe("a slanted wall two rooms share, with a slight bend at one end", () => 
       }
     });
   }
+});
+
+describe("doors on a wall that gets shorter", () => {
+  function tee(widths: [number, number][]): Plan {
+    let p = normalize({
+      ...emptyPlan(),
+      rooms: [room("a", rectangle([0, 0], [6, 2])), room("b", rectangle([0, 2], [3, 5])), room("c", rectangle([3, 2], [6, 5]))],
+    });
+    for (const [y, width] of widths) {
+      const index = wallPairs(p).indexOf("b|c");
+      const wall = p.walls[index]!;
+      p = addDoor(p, index, project([3, y], wall.a, wall.b).t, width).plan;
+    }
+    return p;
+  }
+  const ab = (p: Plan): Extract<Selection, { kind: "wall" }> => wallSelection(p, wallPairs(p).indexOf("a|b")) as Extract<Selection, { kind: "wall" }>;
+  const spans = (p: Plan): [number, number][] =>
+    p.doors.map((d) => {
+      const wall = p.walls[d.wall]!;
+      const length = Math.hypot(wall.b[0] - wall.a[0], wall.b[1] - wall.a[1]);
+      const centre = doorCentre(p, d)![1];
+      const half = Math.min(d.width, length) / 2;
+      return [Number((centre - half).toFixed(3)), Number((centre + half).toFixed(3))];
+    });
+
+  it("keeps the width it was given and gets it back when the wall grows again", () => {
+    const p = tee([[2.75, 0.9]]);
+    const short = nudge(p, ab(p), [0, 2.6]);
+    expect(short.doors).toMatchObject([{ width: 0.9 }]);
+    expect(spans(short)).toEqual([[4.6, 5]]);
+    const back = nudge(short, ab(short), [0, -2.6]);
+    expect(back.doors).toMatchObject([{ width: 0.9 }]);
+    expect(spans(back)[0]![1] - spans(back)[0]![0]).toBeCloseTo(0.9, 6);
+  });
+
+  it("keeps two doors apart and in order rather than one on top of the other", () => {
+    const p = tee([
+      [2.5, 0.6],
+      [3.5, 0.6],
+    ]);
+    const short = nudge(p, ab(p), [0, 1.5]);
+    expect(short.doors).toHaveLength(2);
+    const [first, second] = spans(short);
+    expect(first![0]).toBeGreaterThanOrEqual(3.5 - 1e-9);
+    expect(first![1]).toBeLessThanOrEqual(second![0] + 1e-9);
+    expect(second![1]).toBeLessThanOrEqual(5 + 1e-9);
+    expect(doorCentre(short, short.doors[0]!)![1]).toBeLessThan(doorCentre(short, short.doors[1]!)![1]);
+  });
+
+  it("drops one of two doors that no longer fit side by side, and says so", () => {
+    const p = tee([
+      [2.75, 0.9],
+      [4.6, 0.9],
+    ]);
+    const short = nudge(p, ab(p), [0, 2.6]);
+    expect(short.doors).toHaveLength(1);
+    expect(spans(short)).toEqual([[4.6, 5]]);
+    expect(lostDoors(p, short)).toEqual([["b", "c"]]);
+  });
+});
+
+describe("a room inside another", () => {
+  const walls = (plan: Plan): string[] => plan.walls.map((w, i) => `${wallPairs(plan)[i]} ${w.a.join(",")}-${w.b.join(",")}`);
+
+  it("is walled off from it along its inner edges, not along the outer walls they share", () => {
+    const plan = normalize({ ...emptyPlan(), rooms: [room("living", rectangle([0, 0], [6, 4])), room("closet", rectangle([0, 0], [1.5, 1.5]))] });
+    expect(walls(plan)).toEqual(["closet|living 1.5,0-1.5,1.5", "closet|living 1.5,1.5-0,1.5"]);
+    expect(wallRooms(plan, plan.walls[0]!)).toEqual(["living", "closet"]);
+  });
+
+  it("has walls all round when it stands in the middle", () => {
+    const plan = normalize({ ...emptyPlan(), rooms: [room("living", rectangle([0, 0], [6, 4])), room("island", rectangle([2.5, 1.5], [3.5, 2.5]))] });
+    expect(walls(plan)).toEqual([
+      "island|living 2.5,1.5-3.5,1.5",
+      "island|living 3.5,1.5-3.5,2.5",
+      "island|living 3.5,2.5-2.5,2.5",
+      "island|living 2.5,2.5-2.5,1.5",
+    ]);
+  });
+
+  it("takes over the piece of the outer wall it stands against from the room it is in", () => {
+    const plan = normalize({
+      ...emptyPlan(),
+      rooms: [room("living", rectangle([0, 0], [6, 4])), room("bath", rectangle([6, 0], [9, 4])), room("closet", rectangle([4.5, 1], [6, 2.5]))],
+    });
+    expect(walls(plan)).toEqual([
+      "bath|living 6,0-6,1",
+      "bath|closet 6,1-6,2.5",
+      "bath|living 6,2.5-6,4",
+      "closet|living 4.5,1-6,1",
+      "closet|living 6,2.5-4.5,2.5",
+      "closet|living 4.5,2.5-4.5,1",
+    ]);
+    expect(wallRooms(plan, plan.walls[1]!)).toEqual(["bath", "closet"]);
+  });
+
+  it("gets a door and a neighbour on those walls, and keeps them", () => {
+    const base = normalize({ ...emptyPlan(), rooms: [room("living", rectangle([0, 0], [6, 4])), room("island", rectangle([2.5, 1.5], [3.5, 2.5]))] });
+    const { plan } = addDoor(base, 1, 0.5, 0.8);
+    expect(plan.doors).toEqual([{ wall: 1, at: 0.5, width: 0.8, kind: "door" }]);
+    expect(plan.adjacent).toEqual([["living", "island"]]);
+    const moved = translateRoom(plan, "island", [0.5, 0]);
+    expect(moved.doors).toHaveLength(1);
+    expect(doorCentre(moved, moved.doors[0]!)).toEqual([4, 2]);
+    expect(moved.adjacent).toEqual([["living", "island"]]);
+  });
+
+  it("puts a room in a room in a room next only to the one around it", () => {
+    const plan = normalize({
+      ...emptyPlan(),
+      rooms: [room("living", rectangle([0, 0], [6, 4])), room("island", rectangle([2, 1], [4, 3])), room("core", rectangle([2.5, 1.5], [3.5, 2.5]))],
+    });
+    expect(new Set(wallPairs(plan))).toEqual(new Set(["island|living", "core|island"]));
+  });
 });

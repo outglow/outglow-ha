@@ -95,7 +95,8 @@
           "learning": "Uczy się",
           "ready": "Gotowy",
           "degraded": "Ograniczony",
-          "paused": "Wstrzymany"
+          "paused": "Wstrzymany",
+          "plan_too_large": "Plan za duży"
         }
       },
       "false_alarms_24h": {
@@ -241,9 +242,13 @@
     }
   },
   "issues": {
+    "rates_waiting": {
+      "title": "Nie przywrócono częstości raportów",
+      "description": "Outglow usunięto albo wyłączono, zanim przywróciło częstość raportów {count} żarówek, więc mogą nadal raportować z częstością podniesioną na sesję: {bulbs}. Home Assistant przywraca każdą z nich, gdy Zigbee2MQTT działa i poda jej opcje, i tylko jeśli nadal ma częstość podniesioną (zmienionej ręcznie nie rusza); żarówka jest przywrócona, gdy Zigbee2MQTT pokaże przywróconą częstość. Teraz czeka na Zigbee2MQTT. Po restarcie dodaj albo włącz Outglow ponownie (przywróci je przy starcie) albo ustaw motion_activity_rate tych żarówek w Zigbee2MQTT."
+    },
     "rates_not_restored": {
       "title": "Nie przywrócono częstości raportów",
-      "description": "Outglow usunięto albo wyłączono, gdy MQTT było niedostępne, więc {count} żarówek może nadal raportować z częstością podniesioną na sesję: {bulbs}. Home Assistant przywraca każdą z nich, gdy Zigbee2MQTT poda jej opcje, i tylko jeśli nadal ma częstość podniesioną (zmienionej ręcznie nie rusza). Nieudana próba jest ponawiana coraz rzadziej, teraz co {retry} min, najrzadziej co 30 min. Po restarcie dodaj albo włącz Outglow ponownie (przywróci je przy starcie) albo ustaw motion_activity_rate tych żarówek w Zigbee2MQTT."
+      "description": "Outglow usunięto albo wyłączono, zanim przywróciło częstość raportów {count} żarówek, więc mogą nadal raportować z częstością podniesioną na sesję: {bulbs}. Home Assistant przywraca każdą z nich, gdy Zigbee2MQTT działa i poda jej opcje, i tylko jeśli nadal ma częstość podniesioną (zmienionej ręcznie nie rusza). Nieudana próba jest ponawiana coraz rzadziej, teraz co {retry} min, najrzadziej co 30 min. Po restarcie dodaj albo włącz Outglow ponownie (przywróci je przy starcie) albo ustaw motion_activity_rate tych żarówek w Zigbee2MQTT."
     },
     "output_attribute": {
       "title": "Zigbee2MQTT wysyła atrybuty, nie JSON",
@@ -264,6 +269,10 @@
     "plan_incomplete": {
       "title": "Plan jest niepełny",
       "description": "Żarówki z wykrywaniem spoza planu: {bulbs}. Żarówki poza pokojami: {outside}."
+    },
+    "plan_too_large": {
+      "title": "Plan jest za duży — uprość go",
+      "description": "Outglow nie wykrywa ruchu z tym planem, dopóki go nie uprościsz: {problem}. Otwórz Outglow → Plan i zostaw mniej pokojów, narożników albo żarówek albo dodaj drzwi między pokojami."
     },
     "plan_missing": {
       "title": "Narysuj plan",
@@ -304,6 +313,34 @@
     "panel_conflict": {
       "title": "Ścieżka /{path} w pasku bocznym jest zajęta",
       "description": "Inny panel używa już /{path}, więc panelu Outglow nie ma w pasku bocznym. Usuń albo przemianuj tamten panel (np. wpis panel_custom lub panel_iframe w configuration.yaml) i przeładuj Outglow. Wykrywanie i encje działają bez panelu."
+    },
+    "plan_unreadable": {
+      "title": "Nie da się odczytać zapisanego planu",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Nie da się odczytać zapisanego planu",
+            "description": "Outglow nie odczytało zapisanego planu, więc działa bez pokoi i zostawia wszystkie encje i urządzenia pokoi bez zmian. Nieczytelny plan zachowano jako {path}.\n\nŻeby go odzyskać, popraw ten plik (albo wstaw na jego miejsce kopię z backupu) i wybierz Przywróć. Jeśli zamiast tego narysujesz nowy plan, pierwszy zapisany plan z pokojami zastąpi stary: stare pokoje, których w nim nie ma, zostaną usunięte razem z encjami, a ich id nie dostaną nowe pokoje.",
+            "menu_options": {
+              "restore": "Przywróć plan z zachowanego pliku",
+              "discard": "Odrzuć stary plan"
+            }
+          },
+          "discard": {
+            "title": "Odrzuć stary plan",
+            "description": "Outglow zapomni stary plan. Te stare pokoje zostaną usunięte razem z encjami, urządzeniami i uczeniem: {rooms}. Ich id nie dostaną nowe pokoje. Kopia starego planu zostaje w .storage."
+          }
+        },
+        "abort": {
+          "still_unreadable": "Nadal nie da się odczytać {path}. Popraw plik (albo zastąp go kopią z backupu) i spróbuj jeszcze raz.",
+          "restore_failed": "Planu nie przywrócono: {message}",
+          "resolved": "Plan znów jest czytelny; nie ma nic do zrobienia."
+        }
+      }
+    },
+    "session_rates_waiting": {
+      "title": "Nie przywrócono częstości raportów po sesji",
+      "description": "Outglow podniosło częstość raportów {count} żarówek na sesję uczenia i od ponad {minutes} minut czeka, aż Zigbee2MQTT potwierdzi przywróconą częstość: {bulbs}. Wysyła ją ponownie za każdym razem, gdy Home Assistant połączy się z brokerem MQTT albo Zigbee2MQTT wróci do sieci. Sprawdź, czy Zigbee2MQTT działa i jest osiągalne, albo ustaw motion_activity_rate tych żarówek w Zigbee2MQTT."
     }
   }
 }

@@ -52,13 +52,14 @@ describe("mock backend", () => {
   it("raises the plan revision and rejects stale saves", () => {
     const b = backend();
     const { rev, plan } = b.dispatch({ type: "outglow/plan/get" }) as { rev: number; plan: Plan };
-    expect(b.dispatch({ type: "outglow/plan/save", rev, plan })).toEqual({ rev: rev + 1, warnings: [], background: plan.background });
+    expect(b.dispatch({ type: "outglow/plan/save", rev, plan })).toEqual({ rev: rev + 1, warnings: [], background: plan.background, retired_rooms: plan.retired_rooms });
     expect(() => b.dispatch({ type: "outglow/plan/save", rev, plan })).toThrow(/changed elsewhere/);
     const pinned = { ...plan, bulbs: plan.bulbs.map((x, i) => (i === 0 ? { ...x, room: "hall" } : x)) };
     expect(b.dispatch({ type: "outglow/plan/save", rev: rev + 1, plan: pinned })).toEqual({
       rev: rev + 2,
       warnings: [{ code: "bulb_pinned_elsewhere", params: { ieee: plan.bulbs[0]!.ieee, room: "hall", at: "living" } }],
       background: plan.background,
+      retired_rooms: plan.retired_rooms,
     });
   });
 

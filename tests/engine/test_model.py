@@ -1,7 +1,39 @@
 import math
+import random
+from itertools import accumulate
 
+from engine.defaults import HIST_BINS, HIST_WIDTH
 from engine.model import Hist, Model, RoomCal, from_json, to_json
 from tests.engine.helpers import B1, B2
+
+
+def _reference_median(items: list[tuple[float, float]], total: float) -> float:
+    sums = accumulate(weight for _, weight in items)
+    return next((value for (value, _), acc in zip(items, sums, strict=True) if acc >= total / 2), items[-1][0])
+
+
+def _reference_median_mad(hist: Hist) -> tuple[float, float]:
+    total = hist.observed
+    if total <= 0:
+        return 0.0, 0.0
+    centres = [i * HIST_WIDTH + HIST_WIDTH / 2 for i in range(HIST_BINS)]
+    med = _reference_median(list(zip(centres, hist.bins, strict=True)), total)
+    return med, _reference_median(sorted((abs(c - med), b) for c, b in zip(centres, hist.bins, strict=True)), total)
+
+
+def test_median_and_spread_match_a_sorted_weighted_median() -> None:
+    rng = random.Random(5)
+    weights = (0.0, 0.0, 0.0, 1.0, 0.5, 0.3, 0.2, 0.1, 1.5, -0.4)
+    for _ in range(3000):
+        h = Hist([rng.choice(weights) if rng.random() < 0.4 else 0.0 for _ in range(HIST_BINS)])
+        if rng.random() < 0.3:
+            h.bins[rng.randrange(HIST_BINS)] = h.bins[rng.randrange(HIST_BINS)] = rng.choice(weights[3:])
+        assert h.median_mad() == _reference_median_mad(h)
+
+
+def test_a_median_never_reached_by_the_running_sum_falls_back_to_the_last_bin() -> None:
+    h = Hist([-1e16, 1.0, 1e16] + [0.0] * (HIST_BINS - 3))
+    assert h.median_mad() == _reference_median_mad(h) == (255.0, 250.0)
 
 
 def test_hist_quantiles_and_robust_spread() -> None:
@@ -41,6 +73,14 @@ def test_decay_halves_after_a_half_life() -> None:
     assert math.isclose(m.emit[((B1, B2), "hall")][0], 8 * 0.5 ** (7 / 30))
 
 
+def test_the_empty_house_time_fades_with_the_background() -> None:
+    m = Model(empty_s=3600.0, bg_ticks=7200.0)
+    m.decay(0.0)
+    m.decay(7 * 86400.0)
+    assert math.isclose(m.empty_s, 1800.0)
+    assert math.isclose(m.empty_s / 0.5, m.bg_ticks)
+
+
 def test_json_round_trip_and_lenient_input() -> None:
     m = Model(version=3, updated=5.0, labels={"wizard": 4}, empty_s=12.5, decay_t=1.0)
     m.hist_of((B1, B2)).add(10, 2.0)
@@ -51,7 +91,7 @@ def test_json_round_trip_and_lenient_input() -> None:
     m.entries["hall"] = [0.5]
     data = to_json(m)
     assert to_json(from_json(data)) == data
-    assert to_json(m.copy()) == data
+    assert to_json(m.clone()) == data
     weird = from_json(
         {
             "model_version": True,
@@ -71,3 +111,30 @@ def test_json_round_trip_and_lenient_input() -> None:
     assert weird.labels == {"wizard": 2}
     assert weird.entries == {}
     assert from_json(None).version == 0
+
+
+def test_a_clone_is_equal_and_independent() -> None:
+    m = Model(version=3, updated=5.0, bg_ticks=2.0, empty_s=7.0, decay_t=1.0)
+    m.hist_of((B1, B2)).add(4, 2.0)
+    m.hist[(B1, B2)].censored = 1.0
+    m.bg_onsets[(B1, B2)] = 0.5
+    m.pair_bg[(B1, B2)] = [1.0, 2.0, 3.0]
+    m.emit[((B1, B2), "hall")] = [1.0, 0.0, 0.0]
+    m.rooms["hall"] = RoomCal(a_on=0.7, false_per_day=0.1, detection=0.9)
+    m.labels["wizard"] = 2
+    m.entries["hall"] = [1.0, 2.0]
+    twin = m.clone()
+    assert to_json(twin) == to_json(m)
+    m.hist[(B1, B2)].add(4, 1.0)
+    m.bg_onsets[(B1, B2)] = 0.0
+    m.pair_bg[(B1, B2)][0] = 9.0
+    m.emit[((B1, B2), "hall")][0] = 9.0
+    m.rooms["hall"].a_on = 0.1
+    m.labels["wizard"] = 5
+    m.entries["hall"].append(3.0)
+    assert to_json(twin) != to_json(m)
+    assert to_json(twin) == to_json(from_json(to_json(twin)))
+    assert twin.hist[(B1, B2)].observed == 2.0
+    assert twin.pair_bg[(B1, B2)] == [1.0, 2.0, 3.0]
+    assert twin.emit[((B1, B2), "hall")] == [1.0, 0.0, 0.0]
+    assert (twin.rooms["hall"].a_on, twin.labels["wizard"], twin.entries["hall"]) == (0.7, 2, [1.0, 2.0])

@@ -1,11 +1,14 @@
 import math
 import statistics
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 
 from .defaults import (
     ASYM_PER_H,
     ASYM_RATIO,
     CANDIDATE_RSSI_DBM,
+    CANDIDATE_SPREAD_M,
     CANDIDATE_STEP_M,
     COVERAGE_GOOD,
     COVERAGE_WEAK,
@@ -14,6 +17,8 @@ from .defaults import (
     FROZEN_ADVICE_FRAC,
     GATE_ADVICE_FRAC,
     HARD_WALL_DB,
+    OUTLINE_TOLERANCE_M,
+    OWN_LINE_WEIGHT,
     PARTITION_DB,
     RAISE_SENSITIVITY_TO,
     RSSI_1M_DBM,
@@ -25,7 +30,18 @@ from .ingest import DirSample, Ingest
 from .model import Model
 from .pairs import PairTick
 from .rooms import RoomState
-from .topology import HARD_WALLS, Direction, Pair, Topology, point_in_polygon, room_at, segments_cross
+from .topology import (
+    HARD_WALLS,
+    SEGMENT_SAMPLES,
+    Direction,
+    Pair,
+    Topology,
+    boundary_distance,
+    bulb_room,
+    point_in_polygon,
+    segment_distance,
+    segments_cross,
+)
 from .types import (
     Coverage,
     DirectionFlag,
@@ -152,41 +168,140 @@ def _quantile(values: list[float], q: float) -> float:
     return ordered[min(len(ordered) - 1, math.ceil(q * len(ordered)) - 1)]
 
 
+def simplify(outline: Sequence[Point], tolerance: float = OUTLINE_TOLERANCE_M) -> tuple[Point, ...]:
+    points = tuple(outline)
+    if len(points) <= 4:
+        return points
+    far = max(range(len(points)), key=lambda i: math.dist(points[0], points[i]))
+    kept = _rdp(points[: far + 1], tolerance) + _rdp((*points[far:], points[0]), tolerance)[1:-1]
+    return tuple(kept) if len(kept) >= 3 else points
+
+
+def _rdp(points: Sequence[Point], tolerance: float) -> list[Point]:
+    a, b = points[0], points[-1]
+    inner = [(segment_distance(p, a, b), i) for i, p in enumerate(points[1:-1], 1)]
+    distance, i = max(inner, default=(0.0, 0))
+    if distance <= tolerance:
+        return [a, b]
+    return _rdp(points[: i + 1], tolerance)[:-1] + _rdp(points[i:], tolerance)
+
+
+@dataclass(frozen=True, slots=True)
+class Geometry:
+    outlines: dict[str, tuple[Point, ...]]
+    boxes: dict[str, tuple[float, float, float, float]]
+    hard: tuple[tuple[Point, Point], ...]
+
+    def room_at(self, p: Point) -> str | None:
+        return next(
+            (
+                r
+                for r, (x0, y0, x1, y1) in self.boxes.items()
+                if x0 <= p[0] <= x1 and y0 <= p[1] <= y1 and point_in_polygon(p, self.outlines[r])
+            ),
+            None,
+        )
+
+    def rssi(self, a: Point, b: Point) -> float:
+        d = max(math.dist(a, b), 0.5)
+        walls = 0
+        previous = self.room_at(a)
+        for i in range(1, 25):
+            s = i / 24
+            here = self.room_at((a[0] + s * (b[0] - a[0]), a[1] + s * (b[1] - a[1])))
+            walls += here != previous
+            previous = here
+        hard = sum(1 for w in self.hard if segments_cross(a, b, w[0], w[1]))
+        return RSSI_1M_DBM - RSSI_SLOPE_DB * math.log10(d) - PARTITION_DB * walls - (HARD_WALL_DB - PARTITION_DB) * hard
+
+
+@lru_cache(maxsize=8)
+def geometry(plan: Plan) -> Geometry:
+    outlines = {r.id: simplify(r.outline) for r in plan.rooms}
+    return Geometry(
+        outlines=outlines,
+        boxes={
+            r: (min(x for x, _ in o), min(y for _, y in o), max(x for x, _ in o), max(y for _, y in o))
+            for r, o in outlines.items()
+        },
+        hard=tuple((w.a, w.b) for w in plan.walls if w.kind in HARD_WALLS),
+    )
+
+
 def predicted_rssi(plan: Plan, a: Point, b: Point) -> float:
-    d = max(math.dist(a, b), 0.5)
-    walls = 0
-    previous = room_at(plan, a)
-    for i in range(1, 25):
-        s = i / 24
-        here = room_at(plan, (a[0] + s * (b[0] - a[0]), a[1] + s * (b[1] - a[1])))
-        walls += here != previous
-        previous = here
-    hard = sum(1 for w in plan.walls if w.kind in HARD_WALLS and segments_cross(a, b, w.a, w.b))
-    return RSSI_1M_DBM - RSSI_SLOPE_DB * math.log10(d) - PARTITION_DB * walls - (HARD_WALL_DB - PARTITION_DB) * hard
+    return geometry(plan).rssi(a, b)
 
 
-def candidates(plan: Plan, topo: Topology, room: str, base: PairParams) -> list[tuple[float, Point]]:
-    outline = next(r.outline for r in plan.rooms if r.id == room)
+def _grid(outline: Sequence[Point]) -> Iterator[Point]:
     xs = [p[0] for p in outline]
     ys = [p[1] for p in outline]
-    out = []
     x = math.floor(min(xs) / CANDIDATE_STEP_M) * CANDIDATE_STEP_M
     while x <= max(xs):
         y = math.floor(min(ys) / CANDIDATE_STEP_M) * CANDIDATE_STEP_M
         while y <= max(ys):
             p = (round(x, 2), round(y, 2))
             if point_in_polygon(p, outline):
-                gain = 0.0
-                for b in topo.bulbs:
-                    if predicted_rssi(plan, p, topo.bulb_xy[b]) < CANDIDATE_RSSI_DBM:
-                        continue
-                    other = topo.bulb_room[b]
-                    theta = 0.15 if other == room else 0.45 if topo.is_adjacent(room, other) else 0.1
-                    gain += information(PairParams({room: theta}, base.eta, base.eps1, base.eps2, base.beta), room)
-                out.append((round(gain, 3), p))
+                yield p
             y += CANDIDATE_STEP_M
         x += CANDIDATE_STEP_M
+
+
+def _heard(geo: Geometry, bulbs: dict[str, Point], p: Point) -> list[str]:
+    return [b for b, xy in bulbs.items() if geo.rssi(p, xy) >= CANDIDATE_RSSI_DBM]
+
+
+def candidates(plan: Plan, topo: Topology, room: str, base: PairParams) -> list[tuple[float, Point]]:
+    geo = geometry(plan)
+    out = []
+    for p in _grid(geo.outlines[room]):
+        gain = 0.0
+        for b in _heard(geo, topo.bulb_xy, p):
+            other = topo.bulb_room[b]
+            theta = 0.15 if other == room else 0.45 if topo.is_adjacent(room, other) else 0.1
+            gain += information(PairParams({room: theta}, base.eta, base.eps1, base.eps2, base.beta), room)
+        out.append((round(gain, 3), p))
     return sorted(out, key=lambda c: (-c[0], c[1]))[:TOP_CANDIDATES]
+
+
+def inside_length(a: Point, b: Point, outline: Sequence[Point]) -> float:
+    steps = [(i + 0.5) / SEGMENT_SAMPLES for i in range(SEGMENT_SAMPLES)]
+    inside = sum(point_in_polygon((a[0] + s * (b[0] - a[0]), a[1] + s * (b[1] - a[1])), outline) for s in steps)
+    return math.dist(a, b) * inside / SEGMENT_SAMPLES
+
+
+def second_bulb(plan: Plan, topo: Topology, room: str) -> list[tuple[float, float, Point]]:
+    return list(_second_bulb(plan, room))
+
+
+@lru_cache(maxsize=32)
+def _second_bulb(plan: Plan, room: str) -> tuple[tuple[float, float, Point], ...]:
+    geo = geometry(plan)
+    outline = geo.outlines[room]
+    x0, y0, x1, y1 = geo.boxes[room]
+    reach = math.dist((x0, y0), (x1, y1))
+    bulbs = {b.ieee: (b.x, b.y) for b in plan.bulbs}
+    own = {b.ieee: (b.x, b.y) for b in plan.bulbs if bulb_room(plan, b) == room}
+    grid = [(p, boundary_distance(p, outline)) for p in _grid(outline)]
+    margin = min(CANDIDATE_STEP_M, max((d for _, d in grid), default=0.0))
+    mine = {
+        p: sum(inside_length(p, xy, outline) for b, xy in own.items() if geo.rssi(p, xy) >= CANDIDATE_RSSI_DBM)
+        for p, d in grid
+        if d >= margin
+    }
+    order = sorted(mine, key=lambda p: (-mine[p], p))
+    scored: list[tuple[float, Point, float]] = []
+    picked: list[tuple[float, Point, float]] = []
+    for p in order:
+        if len(picked) == TOP_CANDIDATES and OWN_LINE_WEIGHT * mine[p] + reach < picked[-1][0]:
+            break
+        others = [inside_length(p, bulbs[b], outline) for b in _heard(geo, bulbs, p) if b not in own]
+        total = mine[p] + sum(others)
+        scored.append((OWN_LINE_WEIGHT * mine[p] + (sum(others) / len(others) if others else 0.0), p, total))
+        picked = []
+        for score, q, lines in sorted(scored, key=lambda c: (-c[0], c[1])):
+            if len(picked) < TOP_CANDIDATES and all(math.dist(q, r) >= CANDIDATE_SPREAD_M for _, r, _ in picked):
+                picked.append((score, q, lines))
+    return tuple((round(mine[q], 2), round(lines, 2), q) for _, q, lines in picked)
 
 
 def report(
@@ -293,6 +408,21 @@ def report(
                 )
             )
     lit = {topo.bulb_room[b] for b in topo.bulbs}
+    own = {r: sum(1 for b in topo.bulbs if topo.bulb_room[b] == r) for r in topo.rooms}
+    lone = [r for r in topo.rooms if own[r] == 1 and any(own[n] >= 2 for n in topo.neighbours[r])]
+    for r in lone if settings.global_.mode == "rules" else ():
+        spots = second_bulb(plan, topo, r)
+        recs.append(
+            Recommendation(
+                id=f"one_bulb:{r}",
+                kind="one_bulb",
+                severity="info",
+                action="show_candidates",
+                room=r,
+                numbers={"own_m": spots[0][0] if spots else 0.0, "lines_m": spots[0][1] if spots else 0.0},
+                candidates=tuple(c[2] for c in spots),
+            )
+        )
     for r in (r for r in topo.rooms if r not in lit):
         crossing = sum(1 for p in topo.pairs if r in topo.crossed[p])
         rules = settings.global_.mode == "rules"

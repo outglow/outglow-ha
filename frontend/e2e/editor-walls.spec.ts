@@ -229,6 +229,110 @@ test.describe("walls between two rooms", () => {
     await expect(inspector).not.toContainText("Pinned to");
   });
 
+  test("a step dragged to within 5 cm of the corner closes square, on a 5 cm grid", async ({ page }) => {
+    await load(page, { rooms: [room("l", "Lounge", [[0, 0], [6, 0], [6, 4.5], [5, 4.5], [5, 6], [0, 6]], "#4e9af1")] });
+    await page.evaluate(() => {
+      const ed = document.querySelector("outglow-panel")!.shadowRoot!.querySelector("outglow-plan-editor") as unknown as { _grid: number };
+      ed._grid = 0.05;
+    });
+    const v = await view(page);
+    await page.mouse.click(...screen(v, 2, 2));
+    await drag(page, screen(v, 5.5, 4.5), screen(v, 5.5, 5.96));
+    expect((await currentPlan(page)).rooms[0]!.outline).toEqual(rect(0, 0, 6, 6));
+  });
+
+  test("two doors on a wall made too short for both leave one, with a note, and the other keeps its width", async ({ page }) => {
+    await load(page, {
+      rooms: [room("a", "Attic", rect(0, 0, 6, 2), "#4e9af1"), room("b", "Bedroom", rect(0, 2, 3, 5), "#f28b30"), room("c", "Closet", rect(3, 2, 6, 5), "#42b883")],
+      walls: [
+        { a: [3, 2], b: [0, 2], kind: "partition" },
+        { a: [6, 2], b: [3, 2], kind: "partition" },
+        { a: [3, 2], b: [3, 5], kind: "partition" },
+      ],
+      doors: [
+        { wall: 2, at: 0.25, width: 0.9, kind: "door" },
+        { wall: 2, at: 0.85, width: 0.9, kind: "door" },
+      ],
+      adjacent: [["b", "c"]],
+    } as Partial<PlanLike>);
+    const v = await view(page);
+    await drag(page, screen(v, 1.5, 2), screen(v, 1.5, 4.6));
+    await expect(editor(page).locator(".hint [role=status]")).toHaveText("One of the doors between Bedroom and Closet goes, as the wall they share is too short for both.");
+    expect((await currentPlan(page)).doors).toMatchObject([{ width: 0.9 }]);
+  });
+
+  test("arrows into a place the wall cannot go leave it at the last place it could", async ({ page }) => {
+    const v = await view(page);
+    await page.mouse.click(...screen(v, 5, 1));
+    await expect(editor(page).locator(".inspector")).toContainText("Between Living room and Hall");
+    const right = async (): Promise<number> => Math.max(...(await currentPlan(page)).rooms.find((r) => r.id === "living")!.outline.map((p) => p[0]));
+    const seen: number[] = [];
+    for (let i = 0; i < 25; i += 1) {
+      await page.keyboard.press("ArrowRight");
+      seen.push(await right());
+    }
+    expect(seen.every((x, i) => i === 0 || x >= seen[i - 1]!)).toBe(true);
+    expect(seen.at(-1)).toBeGreaterThan(6.5);
+    await page.keyboard.press("ArrowLeft");
+    expect(await right()).toBeCloseTo(seen.at(-1)! - 0.1, 6);
+    await page.keyboard.press("ControlOrMeta+z");
+    expect(await right()).toBe(5);
+    await expect(editor(page).getByRole("button", { name: "Undo" })).toBeDisabled();
+  });
+
+  test("the note about a bulb going to another room stays while the arrows keep going", async ({ page }) => {
+    const v = await view(page);
+    await page.mouse.click(...screen(v, 5, 1));
+    await expect(editor(page).locator(".inspector")).toContainText("Between Living room and Hall");
+    const status = editor(page).locator(".hint [role=status]");
+    for (let i = 0; i < 13; i += 1) await page.keyboard.press("ArrowLeft");
+    await expect(status).toContainText("Living window belongs to Hall");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await expect(status).toContainText("Living window belongs to Hall");
+    for (let i = 0; i < 15; i += 1) await page.keyboard.press("ArrowRight");
+    await expect(status).not.toContainText("Living window");
+  });
+
+  test("arrows on a door are one undo step", async ({ page }) => {
+    const v = await view(page);
+    const before = await currentPlan(page);
+    await page.mouse.click(...screen(v, 5, 2.4));
+    await expect(editor(page).locator(".inspector h2")).toHaveText("Door");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    expect((await currentPlan(page)).doors).not.toEqual(before.doors);
+    await page.keyboard.press("ControlOrMeta+z");
+    expect((await currentPlan(page)).doors).toEqual(before.doors);
+    await expect(editor(page).getByRole("button", { name: "Undo" })).toBeDisabled();
+  });
+
+  test("the pin tells what the bulb is pinned to on hover and picks the bulb on click", async ({ page }) => {
+    const v = await view(page);
+    const inspector = editor(page).locator(".inspector");
+    await page.mouse.click(...screen(v, 3.8, 2.5));
+    await inspector.locator("select").selectOption("living");
+    await page.mouse.click(...screen(v, 1, 3.5));
+    await expect(inspector.locator("h2")).toHaveText("Room");
+    const pin = editor(page).locator("outglow-editor-canvas g.pin[data-pinned='0x0000000000000002']");
+    const box = (await pin.boundingBox())!;
+    await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.3);
+    await expect(editor(page).locator("outglow-editor-canvas g.pin:hover")).toHaveCount(1);
+    await expect(pin.locator("title")).toHaveText("Pinned to Living room");
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect(inspector.locator("h2")).toHaveText("Living window");
+  });
+
+  test("a pinned bulb moved by hand into another room says it lost its pin", async ({ page }) => {
+    const v = await view(page);
+    await page.mouse.click(...screen(v, 3.8, 2.5));
+    await editor(page).locator(".inspector select").selectOption("living");
+    await drag(page, screen(v, 3.8, 2.5), screen(v, 6, 2.5));
+    await expect(editor(page).locator(".hint [role=status]")).toHaveText("Living window is no longer pinned to Living room, as you moved it into Hall.");
+  });
+
   test("an arrow along the selected wall or its own kind changes nothing and adds no undo step", async ({ page }) => {
     const v = await view(page);
     await page.mouse.click(...screen(v, 5, 1));
@@ -351,4 +455,25 @@ test.describe("on a phone", () => {
     expect(await currentPlan(page)).toEqual(before);
     await expect(editor(page).getByRole("button", { name: "Undo" })).toBeDisabled();
   });
+});
+
+test("a room standing inside another gets walls on its inner sides, a door there and the neighbour", async ({ page }) => {
+  await open(page, "/plan", { width: 1440 });
+  await load(page, { rooms: [room("l", "Lounge", rect(0, 0, 6, 4), "#4e9af1"), room("p", "Pantry", rect(0, 0, 1.5, 1.5), "#f28b30"), room("i", "Island", rect(2.5, 1.5, 3.5, 2.5), "#42b883")] });
+  const v = await view(page);
+  await page.mouse.click(...screen(v, 0.4, 0.4));
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowLeft");
+  const walls = (await currentPlan(page)).walls.map((w) => [w.a, w.b]);
+  expect(walls).toHaveLength(6);
+  expect(walls).not.toContainEqual([[0, 0], [1.5, 0]]);
+  await editor(page).locator("[data-tool=door]").click();
+  await page.mouse.click(...screen(v, 3.5, 2));
+  await expect(editor(page).locator(".inspector")).toContainText("Between Lounge and Island");
+  await editor(page).locator("[data-tool=door]").click();
+  await page.mouse.click(...screen(v, 1.5, 0.75));
+  await expect(editor(page).locator(".inspector")).toContainText("Between Lounge and Pantry");
+  const plan = (await currentPlan(page)) as PlanLike & { adjacent: [string, string][] };
+  expect(plan.doors).toHaveLength(2);
+  expect(plan.adjacent).toEqual([["l", "i"], ["l", "p"]]);
 });

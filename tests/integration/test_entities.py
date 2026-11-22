@@ -88,6 +88,47 @@ async def test_room_entities_follow_frames(hass: HomeAssistant, mqtt_mock: MqttM
     assert device.area_id == area.id
 
 
+async def test_motion_room_breaks_a_tie_by_the_room_shown_then_the_latest_motion(
+    hass: HomeAssistant, mqtt_mock: MqttMockHAClient, clock: Clock
+) -> None:
+    _entry, coordinator = await setup_outglow(hass)
+    await bridge(hass)
+    await with_plan(hass, coordinator)
+
+    def lit(since: float) -> RoomFrame:
+        return RoomFrame(p=1.0, motion=True, occupied=True, since=since, coverage="good")
+
+    def shown() -> str:
+        return state_of(hass, "sensor.outglow_motion_room").state
+
+    coordinator.set_frame(frame(clock(), hall=lit(clock())))
+    await hass.async_block_till_done()
+    assert shown() == "hall"
+    for _ in range(3):
+        clock.advance(6)
+        coordinator.set_frame(frame(clock(), hall=lit(clock() - 12), living=lit(clock() - 1)))
+        await hass.async_block_till_done()
+    assert shown() == "hall"
+    clock.advance(6)
+    coordinator.set_frame(frame(clock(), living=lit(clock() - 1)))
+    await hass.async_block_till_done()
+    assert shown() == "living"
+    clock.advance(1)
+    coordinator.set_frame(frame(clock(), office=RoomFrame(p=0.3, occupied=True, since=clock() - 30)))
+    await hass.async_block_till_done()
+    assert shown() == "office"
+    clock.advance(1)
+    coordinator.set_frame(frame(clock(), hall=lit(clock() - 5), living=lit(clock() - 1)))
+    await hass.async_block_till_done()
+    assert shown() == "living"
+    coordinator.set_frame(frame(clock(), office=RoomFrame(p=0.3, occupied=True, since=clock() - 30)))
+    await hass.async_block_till_done()
+    clock.advance(1)
+    coordinator.set_frame(frame(clock(), hall=lit(clock() - 1), living=lit(clock() - 5)))
+    await hass.async_block_till_done()
+    assert shown() == "hall"
+
+
 async def test_pause_makes_rooms_unavailable(hass: HomeAssistant, mqtt_mock: MqttMockHAClient, clock: Clock) -> None:
     _entry, coordinator = await setup_outglow(hass)
     await with_plan(hass, coordinator)

@@ -22,6 +22,7 @@ export const tw = strings(
     setting_self_tuning: "Daily self-tuning",
     setting_calibrate: "Calibrate now",
     calibrate_hint: "The bulb records the empty room for a minute. Leave the room after confirming.",
+    calibrate_hint_cfar: "The bulb records the empty room for 15 min. Leave the room after confirming.",
     on: "On",
     off: "Off",
     promise: "Nothing is written until you confirm. Outglow never writes to bulbs on its own.",
@@ -42,6 +43,7 @@ export const tw = strings(
     effect_more_radio_traffic: "More radio traffic in the Zigbee network.",
     effect_stops_sensing: "The bulb stops sensing motion; its lines go dark for Outglow.",
     effect_starts_calibration: "Starts a calibration of about {seconds} s. Keep the room empty.",
+    effect_starts_calibration_min: "Starts a calibration of about {minutes} min. Keep the room empty.",
     unknown_value: "unknown",
   },
   {
@@ -55,6 +57,7 @@ export const tw = strings(
     setting_self_tuning: "Samostrojenie dobowe",
     setting_calibrate: "Kalibruj teraz",
     calibrate_hint: "Żarówka przez minutę nagrywa pusty pokój. Po potwierdzeniu wyjdź z pokoju.",
+    calibrate_hint_cfar: "Żarówka przez 15 min nagrywa pusty pokój. Po potwierdzeniu wyjdź z pokoju.",
     on: "Włączone",
     off: "Wyłączone",
     promise: "Nic nie zostanie zapisane bez Twojego potwierdzenia. Outglow nigdy nie zapisuje do żarówek sam.",
@@ -80,6 +83,7 @@ export const tw = strings(
     effect_more_radio_traffic: "Więcej ruchu radiowego w sieci Zigbee.",
     effect_stops_sensing: "Żarówka przestanie wykrywać ruch; jej linie znikną dla Outglow.",
     effect_starts_calibration: "Uruchomi kalibrację na około {seconds} s. Pokój ma być pusty.",
+    effect_starts_calibration_min: "Uruchomi kalibrację na około {minutes} min. Pokój ma być pusty.",
     unknown_value: "nieznane",
   },
 );
@@ -134,6 +138,9 @@ export function effectText(loc: Loc | Lang, effect: BulbEffect): string {
   }
   if (effect.code === "overwrites_all_lines" && typeof params.lines === "number") params.n = params.lines;
   if (effect.code === "starts_calibration" && params.seconds === undefined) params.seconds = 60;
+  if (effect.code === "starts_calibration" && typeof params.seconds === "number" && params.seconds >= 120) {
+    return tw(loc, "effect_starts_calibration_min", { minutes: Math.round(params.seconds / 60) });
+  }
   return tw(loc, `effect_${effect.code}`, params);
 }
 
@@ -348,7 +355,7 @@ export class OgBulbWrite extends LitElement {
     const loc = this.loc;
     const kind = settingKind(this._setting);
     if (kind === "action") {
-      return html`<div class="notice info">${icon(mdiInformation, 20)}<span>${tw(loc, "calibrate_hint")}</span></div>`;
+      return html`<div class="notice info">${icon(mdiInformation, 20)}<span>${tw(loc, this.bulb?.detector === "cfar" ? "calibrate_hint_cfar" : "calibrate_hint")}</span></div>`;
     }
     if (kind === "bool") {
       return html`<label class="toggle">

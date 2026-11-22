@@ -3,6 +3,7 @@ import type { Door, Plan, PlanBulb, Point, Room, RoomId, Wall, WallKind } from "
 export const EPS = 1e-6;
 const ON_LINE = 1e-3;
 const MIN_WALL = 0.05;
+const PROBE = 0.004;
 
 export type Box = [number, number, number, number];
 
@@ -120,6 +121,15 @@ export function properCrossing(a: Point, b: Point, c: Point, d: Point): boolean 
   return o1 * o2 < 0 && o3 * o4 < 0;
 }
 
+function side(a: Point, b: Point, c: Point): number {
+  const v = cross(sub(b, a), sub(c, a));
+  return Math.abs(v) <= ON_LINE * dist(a, b) ? 0 : Math.sign(v);
+}
+
+export function edgesCross(a: Point, b: Point, c: Point, d: Point): boolean {
+  return side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0;
+}
+
 export function selfIntersects(poly: Point[]): boolean {
   const list = edges(poly);
   for (let i = 0; i < list.length; i += 1) {
@@ -137,22 +147,36 @@ export function selfIntersects(poly: Point[]): boolean {
   return false;
 }
 
+export function encloses(outer: Point[], inner: Point[]): boolean {
+  const within = (p: Point): boolean => contains(outer, p) || onBoundary(p, outer);
+  return (
+    inner.every(within) &&
+    edges(inner).every(([a, b]) => within(lerp(a, b, 0.5))) &&
+    !edges(inner).some(([a, b]) => edges(outer).some(([c, d]) => edgesCross(a, b, c, d)))
+  );
+}
+
+function boxesMeet(p: Point[], q: Point[]): boolean {
+  const [px, py, pw, ph] = boxOf(p);
+  const [qx, qy, qw, qh] = boxOf(q);
+  return px < qx + qw - ON_LINE && qx < px + pw - ON_LINE && py < qy + qh - ON_LINE && qy < py + ph - ON_LINE;
+}
+
 export function overlaps(p: Point[], q: Point[]): boolean {
-  if (p.length < 3 || q.length < 3) {
+  if (p.length < 3 || q.length < 3 || !boxesMeet(p, q)) {
     return false;
   }
+  return shareFloor(p, q) && !encloses(p, q) && !encloses(q, p);
+}
+
+function shareFloor(p: Point[], q: Point[]): boolean {
   if (p.some((v) => strictlyInside(q, v)) || q.some((v) => strictlyInside(p, v))) {
     return true;
   }
-  for (const [a, b] of edges(p)) {
-    for (const [c, d] of edges(q)) {
-      if (properCrossing(a, b, c, d)) {
-        return true;
-      }
-    }
+  if (edges(p).some(([a, b]) => edges(q).some(([c, d]) => edgesCross(a, b, c, d)))) {
+    return true;
   }
-  const mids = [...edges(p), ...edges(q)].map(([a, b]) => lerp(a, b, 0.5));
-  return strictlyInside(q, centroid(p)) || strictlyInside(p, centroid(q)) || mids.some((m) => strictlyInside(p, m) && strictlyInside(q, m));
+  return edges(p).some(([a, b]) => strictlyInside(q, lerp(a, b, 0.5))) || edges(q).some(([a, b]) => strictlyInside(p, lerp(a, b, 0.5)));
 }
 
 export function labelPoint(poly: Point[]): Point {
@@ -516,7 +540,7 @@ function overlap(a: Point, b: Point, c: Point, d: Point): [Point, Point] | null 
   return [roundPoint(lerp(a, b, t0)), roundPoint(lerp(a, b, t1))];
 }
 
-export function sharedEdges(rooms: Room[]): SharedEdge[] {
+function collinearEdges(rooms: Room[]): SharedEdge[] {
   const found: SharedEdge[] = [];
   for (let i = 0; i < rooms.length; i += 1) {
     for (let j = i + 1; j < rooms.length; j += 1) {
@@ -529,6 +553,86 @@ export function sharedEdges(rooms: Room[]): SharedEdge[] {
             found.push({ a: hit[0], b: hit[1], rooms: [r.id, s.id] });
           }
         }
+      }
+    }
+  }
+  return found;
+}
+
+function inBox(box: Box, p: Point): boolean {
+  return p[0] >= box[0] - ON_LINE && p[0] <= box[0] + box[2] + ON_LINE && p[1] >= box[1] - ON_LINE && p[1] <= box[1] + box[3] + ON_LINE;
+}
+
+function nestedRooms(rooms: Room[], boxes: Box[]): Set<number> {
+  const inner = new Set<number>();
+  rooms.forEach((child, c) => {
+    const [x, y, w, h] = boxes[c]!;
+    const fits = (box: Box): boolean => inBox(box, [x, y]) && inBox(box, [x + w, y + h]);
+    if (child.outline.length >= 3 && rooms.some((parent, p) => p !== c && parent.outline.length >= 3 && fits(boxes[p]!) && encloses(parent.outline, child.outline))) {
+      inner.add(c);
+    }
+  });
+  return inner;
+}
+
+const sharedEdgesOf = new WeakMap<readonly Room[], SharedEdge[]>();
+
+export function sharedEdges(rooms: Room[]): SharedEdge[] {
+  const known = sharedEdgesOf.get(rooms);
+  if (known) return known;
+  const found = findSharedEdges(rooms);
+  sharedEdgesOf.set(rooms, found);
+  return found;
+}
+
+function findSharedEdges(rooms: Room[]): SharedEdge[] {
+  const collinear = collinearEdges(rooms);
+  const boxes = rooms.map((r) => boxOf(r.outline));
+  const inner = nestedRooms(rooms, boxes);
+  if (inner.size === 0) {
+    return collinear;
+  }
+  const order = new Map(rooms.map((r, i) => [r.id, i]));
+  const vertices = rooms.flatMap((r) => r.outline);
+  const areas = rooms.map((r) => area(r.outline));
+  const at = (p: Point): RoomId | null => {
+    let best = -1;
+    rooms.forEach((r, i) => {
+      if (r.outline.length >= 3 && inBox(boxes[i]!, p) && contains(r.outline, p) && (best < 0 || areas[i]! < areas[best]!)) best = i;
+    });
+    return best < 0 ? null : rooms[best]!.id;
+  };
+  const candidates: [Point, Point][] = [
+    ...collinear.map((e): [Point, Point] => [e.a, e.b]),
+    ...[...inner].flatMap((c) => edges(rooms[c]!.outline)),
+  ];
+  const found: SharedEdge[] = [];
+  const covered = (p: Point): boolean => found.some((e) => project(p, e.a, e.b).d <= ON_LINE);
+  for (const [a, b] of candidates) {
+    const length = dist(a, b);
+    if (length < MIN_WALL) continue;
+    const normal = edgeNormal(a, b);
+    const cuts = [0, 1, ...vertices.map((v) => project(v, a, b)).filter((h) => h.d <= ON_LINE && h.t > 0 && h.t < 1).map((h) => h.t)].sort((x, y) => x - y);
+    const runs: { from: number; to: number; rooms: [RoomId, RoomId] }[] = [];
+    for (let k = 0; k + 1 < cuts.length; k += 1) {
+      const t0 = cuts[k]!;
+      const t1 = cuts[k + 1]!;
+      if ((t1 - t0) * length < EPS) continue;
+      const mid = lerp(a, b, (t0 + t1) / 2);
+      const left = at(add(mid, mul(normal, PROBE)));
+      const right = at(sub(mid, mul(normal, PROBE)));
+      if (!left || !right || left === right || covered(mid)) continue;
+      const pair: [RoomId, RoomId] = order.get(left)! < order.get(right)! ? [left, right] : [right, left];
+      const last = runs[runs.length - 1];
+      if (last && pairKey(last.rooms) === pairKey(pair) && (t0 - last.to) * length <= ON_LINE) {
+        last.to = t1;
+      } else {
+        runs.push({ from: t0, to: t1, rooms: pair });
+      }
+    }
+    for (const run of runs) {
+      if ((run.to - run.from) * length >= MIN_WALL) {
+        found.push({ a: roundPoint(lerp(a, b, run.from)), b: roundPoint(lerp(a, b, run.to)), rooms: run.rooms });
       }
     }
   }
@@ -564,6 +668,35 @@ export function wallPairs(plan: Pick<Plan, "rooms" | "walls">): (string | null)[
   });
 }
 
+function endClamp(t: number, width: number, length: number): number {
+  const half = length > 0 ? Math.min(width, length) / 2 / length : 0.5;
+  return Math.min(1 - half, Math.max(half, t));
+}
+
+function packDoors(row: readonly { door: Door; t: number; moved: boolean }[], length: number): (number | null)[] {
+  const order = row.map((_, i) => i).sort((i, j) => row[i]!.t - row[j]!.t || i - j);
+  const width = (i: number): number => Math.min(row[i]!.door.width, length);
+  const kept = [...order];
+  while (kept.length > 1 && kept.reduce((sum, i) => sum + width(i), 0) > length + 1e-9) {
+    const drop = [...kept].reverse().find((i) => row[i]!.moved) ?? kept[kept.length - 1]!;
+    kept.splice(kept.indexOf(drop), 1);
+  }
+  const at = new Map(kept.map((i) => [i, row[i]!.t * length]));
+  let low = 0;
+  for (const i of kept) {
+    const s = Math.max(at.get(i)!, low + width(i) / 2);
+    at.set(i, s);
+    low = s + width(i) / 2;
+  }
+  let high = length;
+  for (const i of [...kept].reverse()) {
+    const s = Math.min(at.get(i)!, high - width(i) / 2);
+    at.set(i, s);
+    high = s - width(i) / 2;
+  }
+  return row.map((_, i) => (at.has(i) ? (length > 0 ? at.get(i)! / length : 0.5) : null));
+}
+
 export function deriveWalls(plan: Plan, pairs: readonly (string | null)[] = wallPairs(plan)): Pick<Plan, "walls" | "doors" | "adjacent"> {
   const shared = sharedEdges(plan.rooms);
   const keys = shared.map((edge) => pairKey(edge.rooms));
@@ -576,7 +709,7 @@ export function deriveWalls(plan: Plan, pairs: readonly (string | null)[] = wall
     const b = a === edge.b ? edge.a : edge.b;
     return { a, b, kind };
   });
-  const doors: Door[] = [];
+  const placed: { door: Door; wall: number; t: number; moved: boolean }[] = [];
   plan.doors.forEach((door) => {
     const centre = doorCentre(plan, door);
     if (!centre) return;
@@ -592,12 +725,15 @@ export function deriveWalls(plan: Plan, pairs: readonly (string | null)[] = wall
     });
     if (index < 0 || (pair === null && best > 0.01)) return;
     const wall = walls[index]!;
+    placed.push({ door, wall: index, t: project(centre, wall.a, wall.b).t, moved: best > 0.01 });
+  });
+  const doors = placed.flatMap((place) => {
+    const wall = walls[place.wall]!;
     const length = dist(wall.a, wall.b);
-    const width = Math.min(door.width, length);
-    const half = length > 0 ? width / 2 / length : 0.5;
-    const t = project(centre, wall.a, wall.b).t;
-    const at = best <= 0.01 ? t : Math.min(1 - half, Math.max(half, t));
-    doors.push({ ...door, wall: index, at: Number(at.toFixed(4)), width: best <= 0.01 ? door.width : Number(width.toFixed(3)) });
+    const row = placed.filter((p) => p.wall === place.wall);
+    const fitted = row.some((p) => p.moved) ? packDoors(row, length) : row.map((p) => endClamp(p.t, p.door.width, length));
+    const at = fitted[row.indexOf(place)];
+    return at === undefined || at === null ? [] : [{ ...place.door, wall: place.wall, at: Number(at.toFixed(4)) }];
   });
   const adjacent = new Map<string, [RoomId, RoomId]>();
   for (const door of doors) {
@@ -610,6 +746,9 @@ export function deriveWalls(plan: Plan, pairs: readonly (string | null)[] = wall
 }
 
 export function wallRooms(plan: Plan, wall: Wall): RoomId[] {
+  const shared = sharedEdges(plan.rooms);
+  const hit = shared.find((e) => sameSegment(wall, e)) ?? shared.find((e) => segmentsOverlap(wall, e));
+  if (hit) return [...hit.rooms];
   const mid = lerp(wall.a, wall.b, 0.5);
   return plan.rooms.filter((r) => onBoundary(mid, r.outline, 0.01)).map((r) => r.id);
 }

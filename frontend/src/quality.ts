@@ -12,6 +12,7 @@ export const tq = strings(
     rec_no_bulbs: { one: "{room} has no bulbs. Only lines crossing it can see motion there, now {n} line.", other: "{room} has no bulbs. Only lines crossing it can see motion there, now {n} lines." },
     rec_no_bulbs_none: "{room} has no bulbs and no line crosses it, so motion there stays invisible. Put a bulb in it or between its neighbours.",
     rec_no_bulbs_rules: "Rules mode never lights it; bayes mode uses the crossing lines.",
+    rec_one_bulb: "{room} has one bulb. In rules mode, while someone moves in a neighbouring room with bulbs of its own, {room} lights only when all of at least 3 lines from its bulb into that room move. A second bulb or node at a marked spot gives it lines of its own.",
     rec_note_raise: "Writing to the bulb clears its calibration.",
     action_skip_direction: "Skip direction",
     action_bulb_write: "Change…",
@@ -45,6 +46,7 @@ export const tq = strings(
     },
     rec_no_bulbs_none: "{room} nie ma żarówek i przez ten pokój nie przechodzi żadna linia, więc ruch jest tam niewidoczny. Postaw w nim żarówkę albo między sąsiednimi pokojami.",
     rec_no_bulbs_rules: "Tryb reguł nigdy nie zapala pokoju bez żarówek; tryb bayes korzysta z przechodzących linii.",
+    rec_one_bulb: "{room} ma jedną żarówkę. W trybie reguł, gdy ktoś rusza się w sąsiednim pokoju z własnymi żarówkami, {room} zapala się tylko wtedy, gdy ruszają się wszystkie, co najmniej 3, linie z jego żarówki do tamtego pokoju. Druga żarówka albo węzeł w jednym z zaznaczonych miejsc da mu własne linie.",
     rec_note_raise: "Zapis do żarówki kasuje jej kalibrację.",
     action_skip_direction: "Pomiń kierunek",
     action_bulb_write: "Zmień…",
@@ -95,6 +97,8 @@ export function recommendationText(loc: Loc | Lang, rec: Recommendation, names: 
       const text = crossing ? tq(loc, "rec_no_bulbs", { room, n: crossing }) : tq(loc, "rec_no_bulbs_none", { room });
       return n.rules ? `${text} ${tq(loc, "rec_no_bulbs_rules")}` : text;
     }
+    case "one_bulb":
+      return tq(loc, "rec_one_bulb", { room: rec.room ? names.room(rec.room) : "—" });
   }
 }
 

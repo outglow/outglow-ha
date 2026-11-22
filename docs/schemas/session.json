@@ -55,7 +55,9 @@
         "bayes": {"oneOf": [{"$ref": "#/$defs/SessionScore"}, {"type": "null"}], "description": "The same session scored in bayes mode when the active mode is rules"},
         "suggest_mode": {"oneOf": [{"$ref": "settings.json#/$defs/Mode"}, {"type": "null"}], "description": "Mode worth switching to: bayes after learning beats the active rules by at least 10 points"},
         "rooms_without_bulbs": {"type": "array", "items": {"$ref": "common.json#/$defs/RoomId"}, "description": "Rooms seen only by lines crossing them; never lit in rules mode"},
-        "empty_house_hours": {"type": "number", "minimum": 0, "description": "Empty house the model will have learned from after applying: the active model plus this session's empty step. Below 2 h false alarms in an empty house are unknown"}
+        "empty_house_hours": {"type": "number", "minimum": 0, "description": "Empty house the model will have learned from after applying: the model apply builds on (the pending proposal, with empty house learned in the background, else the active model) after the queued labels, this session's empty step among them, are learned from the tick buffer; a tick already learned counts once, at its highest weight. Below 2 h false alarms in an empty house are unknown"},
+        "empty_setup": {"enum": ["none", "persons", "learning", "both"], "description": "What the settings still need before an empty house teaches the model by itself: none; persons (use people at home with at least one person); learning (online learning is off); both"},
+        "empty_needed_h": {"type": "number", "minimum": 0, "description": "Hours of absence the empty house has to last to teach the 2 h by itself: 2 h, or 2 h / 0.3 when others may be home and it counts at the soft weight"}
       }
     },
     "SessionScore": {

@@ -31,6 +31,7 @@ SCHEMA = (
     "kind TEXT NOT NULL, room TEXT, activity TEXT NOT NULL, source TEXT NOT NULL, weight REAL NOT NULL, "
     "status TEXT NOT NULL, pending_id TEXT)",
 )
+ROOMS_QUERY = "SELECT room FROM events WHERE room IS NOT NULL UNION SELECT room FROM labels WHERE room IS NOT NULL"
 KINDS: dict[type, str] = {Observation: "bulb", LightEvent: "light", Context: "context"}
 TYPES: dict[str, type[RawRecord]] = {"bulb": Observation, "light": LightEvent, "context": Context}
 
@@ -247,12 +248,23 @@ class History:
             db.execute("UPDATE labels SET status = ? WHERE pending_id = ? AND status = 'pending'", (status, pending_id))
             db.commit()
 
+    def move_pending(self, old: str, new: str) -> None:
+        with self._lock:
+            db = self._conn()
+            db.execute("UPDATE labels SET pending_id = ? WHERE pending_id = ? AND status = 'pending'", (new, old))
+            db.commit()
+
     def discard_rooms(self, rooms: list[str]) -> None:
         marks = ",".join("?" * len(rooms))
         with self._lock:
             db = self._conn()
             db.execute(f"UPDATE labels SET status = 'discarded' WHERE status = 'pending' AND room IN ({marks})", rooms)
             db.commit()
+
+    def rooms(self) -> set[str]:
+        with self._lock:
+            rows = self._conn().execute(ROOMS_QUERY).fetchall()
+        return {str(room) for (room,) in rows}
 
     def labels(self, t0: float, t1: float, status: LabelStatus | None = None) -> list[Label]:
         query = "SELECT t0, t1, kind, room, activity, source, weight FROM labels WHERE t1 >= ? AND t0 <= ?"

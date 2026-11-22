@@ -1,6 +1,5 @@
 import asyncio
 import re
-import zlib
 from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -100,14 +99,7 @@ def inflate(payload: bytes) -> bytes:
         if len(payload) > MAX_MAP_BYTES:
             raise OutglowError("invalid_format", "The map is too large")
         return payload
-    stream = zlib.decompressobj()
-    try:
-        data = stream.decompress(payload, MAX_MAP_BYTES)
-    except zlib.error as err:
-        raise OutglowError("invalid_format", "The map is neither JSON nor deflated JSON") from err
-    if stream.unconsumed_tail:
-        raise OutglowError("invalid_format", "The map is too large")
-    return data
+    return plan_import.inflate(payload, MAX_MAP_BYTES, "The map", "neither JSON nor deflated JSON")
 
 
 def load(payload: bytes, known: Mapping[str, str], current: Plan | None) -> plan_import.Imported:

@@ -1,6 +1,9 @@
 import asyncio
+import contextlib
 import hashlib
 import json
+import threading
+import time
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -20,6 +23,7 @@ from pytest_homeassistant_custom_component.typing import (
 )
 
 import custom_components.outglow as outglow
+import custom_components.outglow.coordinator as coordinator_module
 from custom_components.outglow import config_flow
 from custom_components.outglow.const import (
     CARDS_FILE,
@@ -32,9 +36,22 @@ from custom_components.outglow.const import (
     VERSION,
 )
 from custom_components.outglow.coordinator import OutglowCoordinator
+from custom_components.outglow.engine import Engine
 from custom_components.outglow.session import SessionManager
+from custom_components.outglow.store import MODEL_KEY
 from tests.contract import validate
-from tests.integration.common import BASE, BULBS, bulb_state, devices_payload, fire, info_payload
+from tests.integration.common import (
+    BASE,
+    BULBS,
+    Clock,
+    bridge,
+    bulb_state,
+    devices_payload,
+    fire,
+    info_payload,
+    setup_outglow,
+    with_plan,
+)
 
 MANIFEST = Path(__file__).resolve().parents[2] / "custom_components" / "outglow" / "manifest.json"
 
@@ -234,6 +251,51 @@ async def test_failed_setup_stops_everything_and_reload_runs_one_coordinator(
     await hass.async_block_till_done()
     assert first.source.messages == 0
     assert _Spy.created[1].source.messages == len(BULBS)
+
+
+def _stored_bg_ticks(hass_storage: dict[str, Any]) -> Any:
+    return hass_storage[MODEL_KEY]["data"]["engine"]["active"]["bg_ticks"]
+
+
+@pytest.mark.parametrize("failure", ["cancel", "error"])
+async def test_a_setup_stopped_while_the_engine_is_built_keeps_the_learned_model(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    hass_storage: dict[str, Any],
+    clock: Clock,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    entry, coordinator = await setup_outglow(hass, clock)
+    await bridge(hass)
+    await with_plan(hass, coordinator)
+    coordinator.engine._active.bg_ticks = 1234.0
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert _stored_bg_ticks(hass_storage) == 1234.0
+    started = threading.Event()
+
+    def build(*args: Any, **kwargs: Any) -> Any:
+        if len(args) >= 3 and args[2]:
+            started.set()
+            if failure == "error":
+                raise RuntimeError("engine")
+            time.sleep(0.3)
+        return Engine(*args, **kwargs)
+
+    monkeypatch.setattr(coordinator_module, "Engine", build)
+    task = hass.async_create_task(hass.config_entries.async_setup(entry.entry_id))
+    for _ in range(400):
+        if started.is_set():
+            break
+        await asyncio.sleep(0.005)
+    assert started.is_set()
+    if failure == "cancel":
+        task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    await hass.async_block_till_done()
+    assert _stored_bg_ticks(hass_storage) == 1234.0
 
 
 async def test_setup_waits_for_mqtt(hass: HomeAssistant) -> None:

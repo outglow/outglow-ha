@@ -7,6 +7,7 @@ from .types import BulbHeight, Plan, PlanBulb, Point, Room
 
 SEGMENT_SAMPLES = 24
 ADJACENT_TOLERANCE_M = 0.25
+ON_LINE_M = 1e-3
 HARD_WALLS = frozenset({"brick", "concrete"})
 
 Pair = tuple[str, str]
@@ -52,6 +53,62 @@ def centroid(polygon: Sequence[Point]) -> Point:
     return (sum(p[0] for p in polygon) / len(polygon), sum(p[1] for p in polygon) / len(polygon))
 
 
+def strictly_inside(p: Point, polygon: Sequence[Point]) -> bool:
+    return point_in_polygon(p, polygon) and boundary_distance(p, polygon) > ON_LINE_M
+
+
+def _turn(a: Point, b: Point, c: Point) -> int:
+    v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    return 0 if abs(v) <= ON_LINE_M * math.dist(a, b) else (1 if v > 0 else -1)
+
+
+def edges_cross(a: Point, b: Point, c: Point, d: Point) -> bool:
+    return _turn(a, b, c) * _turn(a, b, d) < 0 and _turn(c, d, a) * _turn(c, d, b) < 0
+
+
+def _midpoint(a: Point, b: Point) -> Point:
+    return ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+
+
+def _within(p: Point, polygon: Sequence[Point]) -> bool:
+    return point_in_polygon(p, polygon) or boundary_distance(p, polygon) <= ON_LINE_M
+
+
+def encloses(outer: Sequence[Point], inner: Sequence[Point]) -> bool:
+    return (
+        all(_within(v, outer) for v in inner)
+        and all(_within(_midpoint(a, b), outer) for a, b in edges(inner))
+        and not any(edges_cross(a, b, c, d) for a, b in edges(inner) for c, d in edges(outer))
+    )
+
+
+def bounds(polygon: Sequence[Point]) -> tuple[float, float, float, float]:
+    xs = [v[0] for v in polygon]
+    ys = [v[1] for v in polygon]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _boxes_meet(p: Sequence[Point], q: Sequence[Point]) -> bool:
+    a, b = bounds(p), bounds(q)
+    return a[0] < b[2] - ON_LINE_M and b[0] < a[2] - ON_LINE_M and a[1] < b[3] - ON_LINE_M and b[1] < a[3] - ON_LINE_M
+
+
+def outlines_overlap(p: Sequence[Point], q: Sequence[Point]) -> bool:
+    if len(p) < 3 or len(q) < 3 or not _boxes_meet(p, q):
+        return False
+    return _share_floor(p, q) and not encloses(p, q) and not encloses(q, p)
+
+
+def _share_floor(p: Sequence[Point], q: Sequence[Point]) -> bool:
+    if any(strictly_inside(v, q) for v in p) or any(strictly_inside(v, p) for v in q):
+        return True
+    if any(edges_cross(a, b, c, d) for a, b in edges(p) for c, d in edges(q)):
+        return True
+    if any(strictly_inside(_midpoint(a, b), q) for a, b in edges(p)):
+        return True
+    return any(strictly_inside(_midpoint(a, b), p) for a, b in edges(q))
+
+
 def rooms_touch(a: Room, b: Room) -> bool:
     close = [p for p in a.outline if boundary_distance(p, b.outline) <= ADJACENT_TOLERANCE_M]
     close += [p for p in b.outline if boundary_distance(p, a.outline) <= ADJACENT_TOLERANCE_M]
@@ -83,7 +140,20 @@ def adjacency(plan: Plan) -> frozenset[frozenset[str]]:
     explicit = {frozenset(p) for p in plan.adjacent if set(p) <= known and p[0] != p[1]}
     if explicit:
         return frozenset(explicit)
-    return frozenset(frozenset((a.id, b.id)) for a, b in combinations(plan.rooms, 2) if rooms_touch(a, b))
+    return frozenset(
+        frozenset((a.id, b.id))
+        for a, b in combinations(plan.rooms, 2)
+        if rooms_touch(a, b) or directly_inside(a, b, plan.rooms) or directly_inside(b, a, plan.rooms)
+    )
+
+
+def directly_inside(outer: Room, inner: Room, rooms: Iterable[Room]) -> bool:
+    if len(outer.outline) < 3 or len(inner.outline) < 3 or not encloses(outer.outline, inner.outline):
+        return False
+    return not any(
+        m.id not in (outer.id, inner.id) and encloses(outer.outline, m.outline) and encloses(m.outline, inner.outline)
+        for m in rooms
+    )
 
 
 @dataclass(frozen=True, slots=True)

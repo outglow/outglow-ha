@@ -231,6 +231,8 @@ export const MARKED: EventKind[] = [
   "model_apply",
   "model_discard",
   "model_rollback",
+  "model_reset",
+  "snapshot_delete",
 ];
 
 export function marked(events: HistoryEvent[], withMotion: boolean): HistoryEvent[] {

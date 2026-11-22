@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from operator import itemgetter
 
 from .defaults import (
     CFAR_FLOOR,
@@ -24,7 +25,10 @@ def signal_class(signal: int | None) -> int:
 
 
 def threshold_of(hist: Hist) -> float:
-    med, mad = hist.median_mad()
+    return _threshold(hist, *hist.median_mad())
+
+
+def _threshold(hist: Hist, med: float, mad: float) -> float:
     return max(hist.quantile(CFAR_Q), med + CFAR_K * MAD_SCALE * mad, float(CFAR_FLOOR))
 
 
@@ -36,34 +40,64 @@ class Level:
     spread: float
 
 
+@dataclass(frozen=True, slots=True)
+class Basis:
+    ready: dict[Direction, Level]
+    waiting: dict[Direction, tuple[float, float]]
+    pooled: tuple[tuple[Direction, Hist], ...]
+
+
+def basis(directions: tuple[Direction, ...], model: Model, fixed: float | None = None) -> Basis:
+    ready: dict[Direction, Level] = {}
+    waiting: dict[Direction, tuple[float, float]] = {}
+    pooled = []
+    for d in directions:
+        hist = model.hist.get(d, Hist())
+        med, mad = hist.median_mad()
+        spread = max(MAD_SCALE * mad, 1.0)
+        warm = hist.observed >= REF_MIN_SAMPLES
+        if fixed is not None:
+            ready[d] = Level(fixed, True, med, spread)
+        elif warm:
+            ready[d] = Level(_threshold(hist, med, mad), True, med, spread)
+        else:
+            waiting[d] = (med, spread)
+        if warm:
+            pooled.append((d, hist))
+    return Basis(ready, waiting, tuple(sorted(pooled, key=itemgetter(0))))
+
+
 class Cfar:
     def __init__(self, directions: tuple[Direction, ...], fixed: float | None = None) -> None:
         self._directions = directions
-        self._fixed = fixed
+        self.fixed = fixed
         self.levels: dict[Direction, Level] = {}
+        self._basis = basis(directions, Model(), fixed)
+        self._classes: tuple[int, ...] | None = None
+        self._pools: dict[int, float] = {}
 
-    def refresh(self, model: Model, signal: Callable[[Direction], int | None]) -> None:
-        ready = {d for d in self._directions if d in model.hist and model.hist[d].observed >= REF_MIN_SAMPLES}
-        pools: dict[int, Hist] = {}
-        for d in sorted(ready):
+    def load(self, ready: Basis) -> None:
+        self._basis = ready
+        self._classes = None
+
+    def refresh(self, signal: Callable[[Direction], int | None]) -> None:
+        waiting = self._basis.waiting
+        pools = self._pooled(signal) if waiting else {}
+        out = dict(self._basis.ready)
+        for d, (med, spread) in waiting.items():
             c = signal_class(signal(d))
-            pools[c] = pools[c].merged(model.hist[d]) if c in pools else model.hist[d]
-        out = {}
-        for d in self._directions:
-            hist = model.hist.get(d, Hist())
-            med, mad = hist.median_mad()
-            spread = max(MAD_SCALE * mad, 1.0)
-            if self._fixed is not None:
-                out[d] = Level(self._fixed, True, med, spread)
-            elif d in ready:
-                out[d] = Level(threshold_of(hist), True, med, spread)
-            else:
-                c = signal_class(signal(d))
-                pool = pools.get(c)
-                usable = pool is not None and pool.observed >= REF_MIN_SAMPLES
-                start = float(START_THRESHOLDS[c])
-                out[d] = Level(threshold_of(pool) if pool is not None and usable else start, False, med, spread)
-        self.levels = out
+            out[d] = Level(pools.get(c, float(START_THRESHOLDS[c])), False, med, spread)
+        self.levels = {d: out[d] for d in self._directions}
+
+    def _pooled(self, signal: Callable[[Direction], int | None]) -> dict[int, float]:
+        classes = tuple(signal_class(signal(d)) for d, _ in self._basis.pooled)
+        if classes != self._classes:
+            pools: dict[int, Hist] = {}
+            for c, (_, hist) in zip(classes, self._basis.pooled, strict=True):
+                pools[c] = pools[c].merged(hist) if c in pools else hist
+            self._pools = {c: threshold_of(pool) for c, pool in pools.items() if pool.observed >= REF_MIN_SAMPLES}
+            self._classes = classes
+        return self._pools
 
     def state(self, d: Direction, sample: DirSample, was_exceed: bool) -> tuple[DirectionState, float | None]:
         if sample.level is None:

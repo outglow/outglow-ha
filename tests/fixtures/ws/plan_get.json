@@ -178,6 +178,7 @@
       ],
       "excluded_directions": [],
       "retired_rooms": []
-    }
+    },
+    "reserved_rooms": []
   }
 }

@@ -1,5 +1,5 @@
 import type { Frame, LiveMessage } from "../src/api/types";
-import type { Hass, HassConnection, HassMessage, Unsubscribe } from "../src/hass";
+import type { ConnectionEvent, Hass, HassConnection, HassMessage, Unsubscribe } from "../src/hass";
 import { FRAME_PERIOD_S, MOCK_FRAMES, MOCK_PLAN, MockBackend, MockError, fixtureResponses } from "./backend";
 import { diffFrames } from "./delta";
 
@@ -19,12 +19,35 @@ export interface MockOptions {
   frames?: Frame[];
 }
 
-export function mockConnection(options: MockOptions | Frame[] = {}): HassConnection {
+export interface MockConnection extends HassConnection {
+  drop(): void;
+  restore(): void;
+}
+
+export function mockConnection(options: MockOptions | Frame[] = {}): MockConnection {
   const opts: MockOptions = Array.isArray(options) ? { frames: options } : options;
   const backend = opts.backend ?? new MockBackend();
   const speed = opts.speed ?? 1;
+  const listeners = new Map<ConnectionEvent, Set<() => void>>();
+  let offline = false;
+  const fire = (event: ConnectionEvent): void => listeners.get(event)?.forEach((listener) => listener());
   return {
+    addEventListener(event: ConnectionEvent, listener: () => void): void {
+      listeners.set(event, (listeners.get(event) ?? new Set()).add(listener));
+    },
+    removeEventListener(event: ConnectionEvent, listener: () => void): void {
+      listeners.get(event)?.delete(listener);
+    },
+    drop(): void {
+      offline = true;
+      fire("disconnected");
+    },
+    restore(): void {
+      offline = false;
+      fire("ready");
+    },
     sendMessagePromise<T>(message: HassMessage): Promise<T> {
+      if (offline) return Promise.reject({ code: "connection_lost", message: "Connection lost" });
       return backend.handle(message).then(
         (result) => result as T,
         (err: unknown) => {
@@ -45,6 +68,10 @@ export function mockConnection(options: MockOptions | Frame[] = {}): HassConnect
       let timer: ReturnType<typeof setTimeout> | undefined;
       const send = (): void => {
         if (stopped) return;
+        if (offline) {
+          timer = setTimeout(send, (FRAME_PERIOD_S * 1000) / speed);
+          return;
+        }
         const frame = fixed ? fixed[index % fixed.length]! : backend.liveFrame(index, loopStart);
         const wrapped = fixed && index % fixed.length === 0;
         const delta = previous && !wrapped ? diffFrames(previous, frame) : null;

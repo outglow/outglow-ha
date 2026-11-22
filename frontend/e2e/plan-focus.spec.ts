@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { open } from "./helpers";
+import { open, screen, view } from "./helpers";
 
 const LINE = "outglow-plan-view .hit-line[tabindex='0']";
 const ROOM = "outglow-plan-view polygon.room.hit";
@@ -133,4 +133,39 @@ test("keyboard focus on a line stays visible", async ({ page }) => {
   expect(back.focused).toBe(true);
   expect(back.focusVisible).toBe(true);
   expect(back.stroke).not.toBe(TRANSPARENT);
+});
+
+test.describe("plan editor", () => {
+  async function planRing(page: Page): Promise<{ focused: boolean; visible: boolean }> {
+    return page.evaluate(() => {
+      const ed = document.querySelector("outglow-panel")!.shadowRoot!.querySelector("outglow-plan-editor")!;
+      const canvas = ed.shadowRoot!.querySelector("outglow-editor-canvas")!;
+      const svg = canvas.shadowRoot!.querySelector("svg.plan")!;
+      return { focused: canvas.shadowRoot!.activeElement === svg, visible: svg.matches(":focus-visible") };
+    });
+  }
+
+  for (const [name, at, label] of [
+    ["Merge into one room", [[5, 1]], "Merge into one room"],
+    ["Remove corner", [[1, 3], [0, 0]], "Remove corner"],
+  ] as const) {
+    test(`Enter on ${name} leaves the focus on the plan with its ring`, async ({ page }) => {
+      await open(page, "/plan", { width: 1440 });
+      const v = await view(page);
+      for (const p of at) await page.mouse.click(...screen(v, p[0], p[1]));
+      const button = page.locator("outglow-plan-editor .inspector").getByRole("button", { name: label });
+      await button.focus();
+      await page.keyboard.press("Enter");
+      await expect(button).toHaveCount(0);
+      expect(await planRing(page)).toEqual({ focused: true, visible: true });
+    });
+  }
+
+  test("a click on Merge into one room leaves the focus on the plan without a ring", async ({ page }) => {
+    await open(page, "/plan", { width: 1440 });
+    const v = await view(page);
+    await page.mouse.click(...screen(v, 5, 1));
+    await page.locator("outglow-plan-editor .inspector").getByRole("button", { name: "Merge into one room" }).click();
+    expect(await planRing(page)).toEqual({ focused: true, visible: false });
+  });
 });

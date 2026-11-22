@@ -3,7 +3,7 @@
   "$id": "history.json",
   "title": "History",
   "$defs": {
-    "EventKind": {"enum": ["motion_on", "motion_off", "false_alarm", "missed", "correct", "label", "veto", "bulb_write", "model_apply", "model_discard", "model_rollback", "session_start", "session_stop", "house_empty", "house_occupied"]},
+    "EventKind": {"enum": ["motion_on", "motion_off", "false_alarm", "missed", "correct", "label", "veto", "bulb_write", "model_apply", "model_discard", "model_rollback", "model_reset", "snapshot_delete", "session_start", "session_stop", "house_empty", "house_occupied"]},
     "HistoryEvent": {
       "type": "object",
       "additionalProperties": false,

@@ -63,6 +63,22 @@ test.describe("settings", () => {
     await expect(view.locator("#room-h")).toHaveText("Office");
   });
 
+  test("marks a bulb with its own CFAR detector and its 15 min calibration", async ({ page }) => {
+    await open(page, "/settings/hall");
+    const view = page.locator("outglow-settings-view");
+    const hall = view.locator("article.bulb", { hasText: "Hall" });
+    await expect(hall.locator("[data-detector=cfar]")).toHaveText("Detector in the bulb: CFAR — line data skipped");
+    await view.getByRole("button", { name: "Office" }).click();
+    await expect(view.locator("[data-detector=cfar]")).toHaveCount(0);
+    await view.getByRole("button", { name: "Hall", exact: true }).click();
+    await hall.getByRole("button", { name: "Change…" }).click();
+    const dialog = view.locator("og-bulb-write og-sheet");
+    await dialog.getByRole("combobox").selectOption("calibrate");
+    await expect(dialog.getByText("The bulb records the empty room for 15 min.", { exact: false })).toBeVisible();
+    await dialog.locator("[data-action=check]").click();
+    await expect(dialog.getByText("Starts a calibration of about 15 min. Keep the room empty.")).toBeVisible();
+  });
+
   test("applies the pending model", async ({ page }) => {
     await open(page, "/settings");
     const view = page.locator("outglow-settings-view");

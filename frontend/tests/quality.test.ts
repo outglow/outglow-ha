@@ -84,6 +84,16 @@ describe("recommendation texts", () => {
     );
   });
 
+  it("explains why a room with one bulb next to a room with its own pair wants a second one", () => {
+    const lone: Recommendation = { id: "one_bulb:office", kind: "one_bulb", severity: "info", action: "show_candidates", room: "office", rx: null, tx: null, bulb: null, numbers: { lines_m: 8.8 }, candidates: [] };
+    expect(recommendationText("en", lone, names)).toBe(
+      "Biuro has one bulb. In rules mode, while someone moves in a neighbouring room with bulbs of its own, Biuro lights only when all of at least 3 lines from its bulb into that room move. A second bulb or node at a marked spot gives it lines of its own.",
+    );
+    expect(recommendationText("pl", lone, names)).toBe(
+      "Biuro ma jedną żarówkę. W trybie reguł, gdy ktoś rusza się w sąsiednim pokoju z własnymi żarówkami, Biuro zapala się tylko wtedy, gdy ruszają się wszystkie, co najmniej 3, linie z jego żarówki do tamtego pokoju. Druga żarówka albo węzeł w jednym z zaznaczonych miejsc da mu własne linie.",
+    );
+  });
+
   it("names the action or none", () => {
     expect(actionText("en", rec("skip_direction"))).toBe("Skip direction");
     expect(actionText("pl", rec("more_empty_house"))).toBe("Zacznij Naukę");
@@ -167,6 +177,8 @@ describe("bulb write dialog logic", () => {
     expect(effectText("pl", lines)).toBe("Nadpisze ustawienie wszystkich 3 linii żarówki.");
     expect(effectText("pl", { code: "clears_calibration", params: {} })).toContain("kalibrację");
     expect(effectText("en", { code: "starts_calibration", params: {} })).toContain("60 s");
+    expect(effectText("en", { code: "starts_calibration", params: { seconds: 900 } })).toContain("15 min");
+    expect(effectText("pl", { code: "starts_calibration", params: { seconds: 900 } })).toContain("15 min");
   });
 
   it("writes only with a fresh token for the same change", () => {

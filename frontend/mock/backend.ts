@@ -40,7 +40,7 @@ export const LOOP_S = MOCK_FRAMES.length * FRAME_PERIOD_S;
 
 export function fixtureResponses(): Map<string, unknown> {
   const responses = new Map(Object.values(fixtures).map((f) => [f.command, f.response]));
-  responses.set("outglow/plan/get", { rev: MOCK_PLAN.rev, plan: MOCK_PLAN });
+  responses.set("outglow/plan/get", { rev: MOCK_PLAN.rev, plan: MOCK_PLAN, reserved_rooms: [] });
   return responses;
 }
 
@@ -166,10 +166,11 @@ export class MockBackend {
   snapshots: Snapshot[];
   quality: QualityReport;
   session: Session | null = null;
-  background: { mime: string; data_base64: string } | null = null;
+  files = new Map<string, { mime: string; data_base64: string }>();
   tokens = new Map<string, { ieee: string; setting: string; value: unknown; expires: number }>();
   current: Frame | null = null;
   latency = 120;
+  reserved: string[] = [];
   private tokenSeq = 0;
   private sessionSeq = 0;
   private pendingSeq = 7;
@@ -212,6 +213,7 @@ export class MockBackend {
         model: i % 2 === 0 ? "outglow-tw" : "outglow-dimm",
         available: !offline,
         sensing: !offline,
+        detector: ieee === "0x0000000000000003" ? "cfar" : "rule",
         probes: offline ? null : 5,
         activity_rate: offline ? null : ieee === "0x0000000000000005" ? 0 : 2,
         sensitivity: offline ? null : ieee === "0x0000000000000004" ? 40 : 45,
@@ -304,7 +306,7 @@ export class MockBackend {
       case "outglow/bulbs":
         return { bulbs: this.bulbs };
       case "outglow/plan/get":
-        return { rev: this.rev, plan: { ...this.plan, rev: this.rev } };
+        return { rev: this.rev, plan: { ...this.plan, rev: this.rev }, reserved_rooms: this.reserved };
       case "outglow/plan/save": {
         const request = req as unknown as OutglowCommands["outglow/plan/save"]["request"];
         if (request.rev !== this.rev) {
@@ -320,16 +322,22 @@ export class MockBackend {
         const upload = request.background_image;
         if (upload && background) {
           if (upload.deflated) throw new MockError("invalid_format", "The mock takes inflated images only");
-          this.background = { mime: upload.mime, data_base64: upload.data_base64 };
-          background = { ...background, file: `plan-${hex16(upload.data_base64)}.${upload.mime === "image/jpeg" ? "jpg" : upload.mime.split("/")[1]!.replace("svg+xml", "svg")}` };
+          const ext = upload.mime === "image/jpeg" ? "jpg" : upload.mime.split("/")[1]!.replace("svg+xml", "svg");
+          const file = /^plan-[0-9a-f]{16}\./.test(background.file) ? background.file : `plan-${hex16(upload.data_base64)}.${ext}`;
+          this.files.set(file, { mime: upload.mime, data_base64: upload.data_base64 });
+          background = { ...background, file };
+        } else if (background && !this.files.has(background.file)) {
+          background = null;
         }
+        const previous = this.plan.background?.file;
+        for (const file of [...this.files.keys()]) if (file !== previous && file !== background?.file) this.files.delete(file);
         this.rev += 1;
         this.plan = { ...structuredClone(request.plan), background, rev: this.rev, retired_rooms: retired };
         const warnings = this.plan.bulbs.flatMap((b) => {
           const at = roomAt(this.plan, [b.x, b.y]);
           return b.room !== null && b.room !== at ? [{ code: "bulb_pinned_elsewhere" as const, params: { ieee: b.ieee, room: b.room, at } }] : [];
         });
-        return { rev: this.rev, warnings, background };
+        return { rev: this.rev, warnings, background, retired_rooms: retired };
       }
       case "outglow/plan/import":
         return this.importPlan(req as unknown as OutglowCommands["outglow/plan/import"]["request"]);
@@ -342,7 +350,11 @@ export class MockBackend {
         return this.valetudo(request.current ?? null);
       }
       case "outglow/plan/background/get":
-        return { image: this.background };
+        {
+          const file = this.plan.background?.file ?? null;
+          const image = (file !== null && this.files.get(file)) || null;
+          return { image, file: image ? file : null };
+        }
       case "outglow/plan/background/set": {
         const request = req as unknown as OutglowCommands["outglow/plan/background/set"]["request"];
         const ext = request.mime === "image/jpeg" ? "jpg" : request.mime.split("/")[1]!.replace("svg+xml", "svg");
@@ -387,8 +399,17 @@ export class MockBackend {
         const target = this.snapshots.find((s) => s.snapshot_id === req.snapshot_id);
         if (!target) throw new MockError("not_found", "No such snapshot");
         const id = `m-${String(this.model.model_version + 1).padStart(4, "0")}`;
-        this.snapshots.push({ snapshot_id: id, t: now, reason: "before_rollback", model_version: this.model.model_version });
+        const current = this.settings.global.mode;
+        const mode = target.mode && target.mode !== current ? target.mode : null;
+        this.snapshots.push({
+          snapshot_id: id,
+          t: now,
+          reason: "before_rollback",
+          model_version: this.model.model_version,
+          ...(mode ? { mode: current } : {}),
+        });
         this.model = { ...this.model, model_version: this.model.model_version + 1, updated: now, pending: null };
+        if (mode) this.settings = { ...this.settings, global: { ...this.settings.global, mode } };
         return { model_version: this.model.model_version, snapshot_id: id };
       }
       case "outglow/model/snapshot/delete": {
@@ -575,6 +596,8 @@ export class MockBackend {
       suggest_mode: rules ? "bayes" : null,
       rooms_without_bulbs: rooms.filter((room) => !this.plan.bulbs.some((b) => bulbRoom(this.plan, b) === room)),
       empty_house_hours: Math.round(steps.filter((st) => st.kind === "empty").reduce((sum, st) => sum + ((st.t1 ?? now) - st.t0), 0) / 3.6) / 1000,
+      empty_setup: emptySetup(this.settings.global),
+      empty_needed_h: this.settings.global.others_may_be_home ? 6.7 : 2,
     };
     this.model = {
       ...this.model,
@@ -625,7 +648,14 @@ export class MockBackend {
       throw new MockError("not_found", "No such proposal");
     }
     const snapshot = `m-${String(this.model.model_version).padStart(4, "0")}a`;
-    this.snapshots.push({ snapshot_id: snapshot, t: now, reason: "before_apply", model_version: this.model.model_version });
+    const before = this.settings.global.mode;
+    this.snapshots.push({
+      snapshot_id: snapshot,
+      t: now,
+      reason: "before_apply",
+      model_version: this.model.model_version,
+      ...(mode && mode !== before ? { mode: before } : {}),
+    });
     const labels = { ...this.model.labels };
     for (const [k, v] of Object.entries(this.model.pending.labels)) labels[k] = (labels[k] ?? 0) + v;
     this.model = { ...this.model, model_version: this.model.model_version + 1, updated: now, labels, pending: null };
@@ -649,7 +679,7 @@ export class MockBackend {
     } else if (request.setting === "sensing" && request.value === false) {
       effects.push({ code: "stops_sensing", params: {} });
     } else if (request.setting === "calibrate") {
-      effects.push({ code: "starts_calibration", params: { seconds: 60 } });
+      effects.push({ code: "starts_calibration", params: { seconds: bulb.detector === "cfar" ? 900 : 60 } });
     }
     const previous = (bulb as unknown as Record<string, unknown>)[request.setting];
     return {
@@ -741,4 +771,10 @@ export class MockBackend {
     }
     return { frames, truncated: request.start < oldest };
   }
+}
+
+function emptySetup(g: Settings["global"]): NonNullable<SessionSummary["empty_setup"]> {
+  const persons = g.use_persons && g.persons.length > 0;
+  if (persons) return g.learning ? "none" : "learning";
+  return g.learning ? "persons" : "both";
 }

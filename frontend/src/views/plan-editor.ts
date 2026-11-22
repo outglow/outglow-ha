@@ -12,6 +12,7 @@ import {
   mdiDragVertical,
   mdiExport,
   mdiFileUpload,
+  mdiImage,
   mdiImport,
   mdiInformation,
   mdiLightbulb,
@@ -20,15 +21,16 @@ import {
   mdiPinOff,
   mdiRedo,
   mdiRefresh,
+  mdiRestore,
   mdiRobotVacuum,
   mdiUndo,
   mdiVectorPolygon,
   mdiVectorSquare,
+  mdiVectorUnion,
 } from "@mdi/js";
 import { css, html, nothing, type PropertyValues } from "lit";
 import { deflate, fits, fromBase64, INLINE_MAX, MESSAGE_MAX, megabytes, toBase64, utf8Length } from "../api/deflate";
 import type {
-  Background,
   BackgroundImage,
   BackgroundUpload,
   BulbHeight,
@@ -40,14 +42,23 @@ import type {
   ValetudoRobotsResponse,
   WallKind,
 } from "../api/types";
+import { Backdrop, imageUrl } from "../background";
 import { History } from "../editor/undo";
+import { draftKey, dropDraft, getImage, keepAlive, listDrafts, putImage, saveDraft, sweepImages, type Draft } from "../editor/drafts";
 import {
   addDoor,
   edgeLengths,
   importPlan,
   doorSelection,
+  cutCorner,
+  mergedArea,
+  mergeRooms,
+  mergeSides,
+  mergeTrouble,
   movedBulbs,
+  unpinnedBulbs,
   lostDoors,
+  looksRetired,
   nudge,
   nudgeSelection,
   placeBulb,
@@ -56,20 +67,27 @@ import {
   removeBulb,
   removeDoor,
   removeRoom,
+  sameContent,
   samePlan,
+  retiredOver,
+  retireGone,
+  reviveRetired,
+  type Renamed,
   setEdgeLength,
   setWallKind,
   trackSelection,
   updateBulb,
   updateDoor,
   updateRoom,
+  vertexSelection,
   wallIndex,
+  wallSelection,
   type Selection,
 } from "../editor/ops";
 import { type OutglowEditorCanvas, type Tool } from "../editor/editor-canvas";
 import "../editor/editor-canvas";
-import { fmtNumber } from "../format";
-import { add, area, boxOf, bulbRoom, dist, roomAt, validate, wallRooms, type Box, type Issue } from "../geometry";
+import { fmtDateTime, fmtNumber } from "../format";
+import { add, area, boxOf, bulbRoom, dist, pairKey, roomAt, validate, wallPairs, type Box, type Issue } from "../geometry";
 import { strings } from "../i18n";
 import { icon } from "../icons";
 import { errorCode } from "../strings/common";
@@ -91,6 +109,7 @@ export const te = strings(
     grid_value: "{n} cm",
     magnet: "Snap to walls and corners",
     keep_ratio: "Keep proportions when resizing",
+    background_layer: "Background",
     import: "Import",
     export: "Export",
     export_title: "Download the plan as Outglow JSON",
@@ -106,13 +125,41 @@ export const te = strings(
     shortcut: "{label} ({key})",
     hint_select: "Click a room to resize, move or reshape it, or a wall, door or bulb to edit it. Drag empty space to pan.",
     hint_room:
-      "Square handles resize (Shift keeps proportions, Alt from the centre); drag a wall to move it, shared walls move in both rooms (Alt: only this one); drag inside to move the room (Shift: in a straight line); drag a corner to reshape, double-click a wall to add one. Cmd/Ctrl turns snapping off. Arrows move, Alt+arrows resize.",
-    hint_room_touch: "Drag the square handles to resize, a wall to move it, the inside to move the room and a corner to reshape. The proportions button in the toolbar keeps the shape.",
-    hint_wall: "Drag the wall to move it; arrow keys move it too. Double-click a room's edge to add a corner.",
+      "Square handles resize (Shift keeps proportions, Alt from the centre); drag a wall to move it, shared walls move in both rooms (Alt: only this one); drag inside to move the room (Shift: in a straight line); drag a corner to reshape, double-click a wall to add one; click a corner and press Delete, or double-click it, to remove it. Cmd/Ctrl turns snapping off. Arrows move, Alt+arrows resize; , and . pick a corner, [ and ] a wall.",
+    hint_room_touch: "Drag the square handles to resize, a wall to move it, the inside to move the room and a corner to reshape; tap a corner to remove it from the panel. The proportions button in the toolbar keeps the shape.",
+    hint_wall: "Drag the wall to move it; arrow keys move it too. Delete turns it into No wall, the rooms stay apart; Merge into one room in the panel takes the line away. Double-click a room's edge to add a corner. [ and ] pick the previous and next wall.",
+    hint_vertex: "Drag the corner to move it; arrow keys move it too. Delete, Backspace or a double-click removes it. , and . pick the previous and next corner.",
+    hint_vertex_touch: "Drag the corner to move it. Remove corner in the panel takes it away.",
+    corner: "Corner",
+    corner_of: "Corner {n} of {room}",
+    corner_at: "At {x} m, {y} m",
+    remove_corner: "Remove corner",
+    corner_missing: "This corner is no longer there.",
+    corner_min: "A room needs at least 3 corners.",
+    corner_overlap: "This corner stays: without it the room would run over another room.",
+    corner_shape: "This corner stays: without it the room's outline would cross itself or fold flat.",
+    corner_picked: "Corner {n} of {room}, at {x} m, {y} m",
+    wall_picked: "Wall {k} of {n} of {room}: between {a} and {b}, {length} m",
+    wall_delete: "Delete: No wall here, the rooms stay apart.",
+    merge_rooms: "Merge into one room",
+    merge_failed: "These rooms cannot be merged: together they would not make one room without a hole.",
+    merge_inside: "These rooms cannot be merged: {inner} lies inside {outer}. Move {inner} so the two only meet at the wall.",
+    merge_overlap: "These rooms cannot be merged: they overlap. Move a wall so the two only meet at the wall.",
+    rooms_merged: "{gone} is now part of {keep}.",
+    merge_loses: "Merging removes {gone}: when you save, its settings, its entities in Home Assistant and what Outglow learnt for it go.",
+    merge_area_drops: "{keep} stays in the area {area}; the area {gone_area} of {gone} is then no room's.",
+    merge_area_takes: "{keep} takes the area {area} from {gone}.",
+    merge_area_bulbs: {
+      one: "{bulbs} is not on the plan and belongs to {gone} through the area {gone_area}: after the merge it belongs to no room. Put it on the plan, or move it to the area {area} in Home Assistant.",
+      other: "{bulbs} are not on the plan and belong to {gone} through the area {gone_area}: after the merge they belong to no room. Put them on the plan, or move them to the area {area} in Home Assistant.",
+    },
+    wall_mixed: "The wall between {a} and {b} had more than one type and is now {kind} along its whole length.",
     bulb_moved: "After this change {bulb} belongs to {to} (before: {from}). To keep it in {from}, choose that room under Room in the bulb's settings.",
     bulb_moved_many: "After this change {bulbs} belong to other rooms. To keep one where it was, choose its room under Room in the bulb's settings.",
     outside: "no room",
     door_lost: "The door between {a} and {b} goes, as the rooms no longer share a wall.",
+    door_squeezed: "One of the doors between {a} and {b} goes, as the wall they share is too short for both.",
+    bulb_unpinned: "{bulb} is no longer pinned to {from}, as you moved it into {to}.",
     hint_rect: "Drag to draw a room. Corners snap to the grid and to other rooms; hold Alt or Cmd/Ctrl to draw freely.",
     hint_poly: "Click to add corners, then click the first corner or press Enter to close. Backspace removes the last corner, Esc cancels.",
     hint_door: "Click a shared wall between two rooms to put a door there.",
@@ -197,7 +244,9 @@ export const te = strings(
     kept_aligned: "{bulbs} bulbs kept and moved onto the map by {rooms} rooms with the same name (turned {rotation}°{mirrored}, rooms off by {rms} m)",
     kept_mirrored: ", mirrored",
     kept_unaligned: "{bulbs} bulbs kept where they were; no room has the same name",
-    kept_one_room: "{bulbs} bulbs kept where they were; only one room has the same name, and moving them takes two",
+    kept_one_room: "{bulbs} bulbs kept where they were; only one room has the same name, and moving them takes three",
+    kept_two_rooms: "{bulbs} bulbs kept where they were; only two rooms have the same name, too few to tell how the map is turned, and moving them takes three",
+    background_lost: "The background of this version is no longer stored; import the map again to bring it back",
     background_too_large: "The background is {size} MB even compressed, and Home Assistant takes at most {limit} MB at once",
     preview: "Preview",
     previewing: "Reading…",
@@ -219,9 +268,25 @@ export const te = strings(
     warning_background_dropped: "The map is too detailed for a background (over {limit_mb} MB); it is left out",
     imported: "Plan imported. Review it and save.",
     conflict: "Someone saved the plan in another window while you were editing.",
+    conflict_remote: "The connection came back and the plan on the server has changed meanwhile. Your unsaved changes are kept.",
+    reconnected_kept: "The connection came back. Your unsaved changes are kept.",
+    save_landed: "The connection came back; the plan had been saved.",
+    draft_found: "Unsaved changes to the plan from {when} were found in this browser.",
+    draft_stale: "The plan on the server has changed since; saving the restored plan replaces it.",
+    draft_restore: "Restore",
+    draft_discard: "Discard",
+    draft_restored: "Unsaved changes restored. Review them and save.",
+    draft_background_lost: "The background from the import could not be kept in the browser; import the map again to get it back.",
+    draft_restored_lost: "Unsaved changes restored without the imported background. Import the map again to get it back.",
     reload: "Load theirs",
     overwrite: "Keep mine",
     no_bulb_to_place: "Pick a bulb from the list first.",
+    renamed_rooms: "{rooms}: a room with this id was removed and saved, so it comes back as a new room. Home Assistant gives it new entities (new entity_id); update automations that used the old ones.",
+    conflict_removes: "Keep mine removes: {rooms}.",
+    conflict_renames: "Keep mine gives new ids and new entities (new entity_id) to: {rooms}.",
+    conflict_same: "Keep mine changes no room ids.",
+    new_entities: "A saved plan had a room with this name and it was removed. For Home Assistant this is a new room: its entities get new IDs ({entity}), so automations that used the old room need updating.",
+    save_invalid: "The plan was not saved: {message}",
     edit_selection: "Edit",
     rooms_count: { one: "{n} room", other: "{n} rooms" },
     bulbs_count: { one: "{n} bulb", other: "{n} bulbs" },
@@ -239,6 +304,7 @@ export const te = strings(
     grid_value: "{n} cm",
     magnet: "Przyciągaj do ścian i narożników",
     keep_ratio: "Zachowuj proporcje przy zmianie rozmiaru",
+    background_layer: "Tło",
     export: "Eksportuj",
     export_title: "Pobierz plan jako Outglow JSON",
     more: "Więcej",
@@ -254,13 +320,41 @@ export const te = strings(
     shortcut: "{label} ({key})",
     hint_select: "Kliknij pokój, żeby zmienić jego rozmiar, położenie albo kształt, albo ścianę, drzwi czy żarówkę, żeby je edytować. Przeciągnij puste miejsce, żeby przesunąć widok.",
     hint_room:
-      "Kwadratowe uchwyty zmieniają rozmiar (Shift zachowuje proporcje, Alt od środka); przeciągnięta ściana przesuwa się, wspólna w obu pokojach (Alt: tylko w tym); przeciągnięte wnętrze przesuwa pokój (Shift: w linii prostej); narożnik zmienia kształt, dwuklik na ścianie dodaje narożnik. Cmd/Ctrl wyłącza przyciąganie. Strzałki przesuwają, Alt+strzałki zmieniają rozmiar.",
-    hint_room_touch: "Przeciągnij kwadratowe uchwyty, żeby zmienić rozmiar, ścianę, żeby ją przesunąć, wnętrze, żeby przesunąć pokój, a narożnik, żeby zmienić kształt. Przycisk proporcji w pasku zachowuje kształt.",
-    hint_wall: "Przeciągnij ścianę, żeby ją przesunąć; strzałki też ją przesuwają. Dwuklik na krawędzi pokoju dodaje narożnik.",
+      "Kwadratowe uchwyty zmieniają rozmiar (Shift zachowuje proporcje, Alt od środka); przeciągnięta ściana przesuwa się, wspólna w obu pokojach (Alt: tylko w tym); przeciągnięte wnętrze przesuwa pokój (Shift: w linii prostej); narożnik zmienia kształt, dwuklik na ścianie dodaje narożnik; kliknięty narożnik usuwa Delete albo dwuklik. Cmd/Ctrl wyłącza przyciąganie. Strzałki przesuwają, Alt+strzałki zmieniają rozmiar; , i . wybierają narożnik, [ i ] ścianę.",
+    hint_room_touch: "Przeciągnij kwadratowe uchwyty, żeby zmienić rozmiar, ścianę, żeby ją przesunąć, wnętrze, żeby przesunąć pokój, a narożnik, żeby zmienić kształt; stuknięty narożnik usuniesz w panelu. Przycisk proporcji w pasku zachowuje kształt.",
+    hint_wall: "Przeciągnij ścianę, żeby ją przesunąć; strzałki też ją przesuwają. Delete zamienia ją w „Bez ściany”, pokoje zostają osobno; Scal w jeden pokój w panelu usuwa tę linię. Dwuklik na krawędzi pokoju dodaje narożnik. [ i ] wybierają poprzednią i następną ścianę.",
+    hint_vertex: "Przeciągnij narożnik, żeby go przesunąć; strzałki też go przesuwają. Delete, Backspace albo dwuklik go usuwa. , i . wybierają poprzedni i następny narożnik.",
+    hint_vertex_touch: "Przeciągnij narożnik, żeby go przesunąć. Usuń narożnik w panelu go usuwa.",
+    corner: "Narożnik",
+    corner_of: "Narożnik {n} pokoju {room}",
+    corner_at: "Położenie: {x} m, {y} m",
+    remove_corner: "Usuń narożnik",
+    corner_missing: "Tego narożnika już nie ma.",
+    corner_min: "Pokój musi mieć co najmniej 3 narożniki.",
+    corner_overlap: "Ten narożnik zostaje: bez niego pokój wszedłby na inny pokój.",
+    corner_shape: "Ten narożnik zostaje: bez niego obrys pokoju przeciąłby sam siebie albo się spłaszczył.",
+    corner_picked: "Narożnik {n} pokoju {room}, położenie {x} m, {y} m",
+    wall_picked: "Ściana {k} z {n} pokoju {room}: między {a} i {b}, {length} m",
+    wall_delete: "Delete: bez ściany, pokoje zostają osobno.",
+    merge_rooms: "Scal w jeden pokój",
+    merge_failed: "Tych pokojów nie da się scalić: razem nie tworzą jednego pokoju bez dziury.",
+    merge_inside: "Tych pokojów nie da się scalić: {inner} leży wewnątrz pokoju {outer}. Przesuń {inner} tak, żeby pokoje stykały się tylko ścianą.",
+    merge_overlap: "Tych pokojów nie da się scalić: nachodzą na siebie. Przesuń ścianę tak, żeby pokoje stykały się tylko ścianą.",
+    rooms_merged: "{gone} jest teraz częścią pokoju {keep}.",
+    merge_loses: "Scalenie usuwa pokój {gone}: po zapisaniu przepadną jego ustawienia, encje w Home Assistant i to, czego Outglow się dla niego nauczył.",
+    merge_area_drops: "{keep} zostaje w obszarze {area}; obszar {gone_area} pokoju {gone} nie będzie już należał do żadnego pokoju.",
+    merge_area_takes: "{keep} przejmuje obszar {area} od pokoju {gone}.",
+    merge_area_bulbs: {
+      one: "Żarówki {bulbs} nie ma na planie, a do pokoju {gone} należy przez obszar {gone_area}: po scaleniu nie będzie należeć do żadnego pokoju. Postaw ją na planie albo przenieś ją w Home Assistant do obszaru {area}.",
+      other: "Żarówek {bulbs} nie ma na planie, a do pokoju {gone} należą przez obszar {gone_area}: po scaleniu nie będą należeć do żadnego pokoju. Postaw je na planie albo przenieś je w Home Assistant do obszaru {area}.",
+    },
+    wall_mixed: "Ściana między: {a} i {b} miała kilka rodzajów, teraz na całej długości: {kind}.",
     bulb_moved: "Po tej zmianie {bulb} należy do: {to} (wcześniej: {from}). Żeby została w: {from}, wybierz ten pokój w polu Pokój żarówki.",
     bulb_moved_many: "Po tej zmianie {bulbs} należą do innych pokojów. Żeby któraś została, wybierz jej pokój w polu Pokój żarówki.",
     outside: "żaden pokój",
     door_lost: "Drzwi między pokojami {a} i {b} znikają, bo pokoje nie mają już wspólnej ściany.",
+    door_squeezed: "Jedne z drzwi między pokojami {a} i {b} znikają, bo wspólna ściana jest za krótka dla obu.",
+    bulb_unpinned: "{bulb} nie jest już przypięta do pokoju {from}, bo przeniesiono ją do: {to}.",
     hint_rect: "Przeciągnij, żeby narysować pokój. Narożniki przyciągają się do siatki i innych pokojów; z Alt albo Cmd/Ctrl rysujesz swobodnie.",
     hint_poly: "Klikaj, żeby dodać narożniki; zamknij klikając pierwszy albo Enterem. Backspace usuwa ostatni, Esc anuluje.",
     hint_door: "Kliknij wspólną ścianę dwóch pokojów, żeby wstawić drzwi.",
@@ -345,7 +439,9 @@ export const te = strings(
     kept_aligned: "Żarówki zachowane ({bulbs}) i przeniesione na mapę według pokojów o tych samych nazwach ({rooms}); obrót {rotation}°{mirrored}, rozbieżność pokojów {rms} m",
     kept_mirrored: ", odbicie",
     kept_unaligned: "Żarówki zachowane ({bulbs}) w dotychczasowych miejscach; żaden pokój nie ma tej samej nazwy",
-    kept_one_room: "Żarówki zachowane ({bulbs}) w dotychczasowych miejscach; tylko jeden pokój ma tę samą nazwę, a do przeniesienia trzeba dwóch",
+    kept_one_room: "Żarówki zachowane ({bulbs}) w dotychczasowych miejscach; tylko jeden pokój ma tę samą nazwę, a do przeniesienia trzeba trzech",
+    kept_two_rooms: "Żarówki zachowane ({bulbs}) w dotychczasowych miejscach; tylko dwa pokoje mają te same nazwy, za mało, by poznać obrót mapy, a do przeniesienia trzeba trzech",
+    background_lost: "Tło tej wersji nie jest już zapisane; zaimportuj mapę jeszcze raz, żeby je przywrócić",
     background_too_large: "Tło ma {size} MB nawet po skompresowaniu, a Home Assistant przyjmuje naraz najwyżej {limit} MB",
     preview: "Podgląd",
     previewing: "Czytam…",
@@ -367,9 +463,25 @@ export const te = strings(
     warning_background_dropped: "Mapa jest zbyt szczegółowa na tło (ponad {limit_mb} MB); pominięto je",
     imported: "Plan wczytany. Przejrzyj go i zapisz.",
     conflict: "Ktoś zapisał plan w innym oknie, kiedy go edytowałeś.",
+    conflict_remote: "Połączenie wróciło, a plan na serwerze w tym czasie się zmienił. Twoje niezapisane zmiany są zachowane.",
+    reconnected_kept: "Połączenie wróciło. Twoje niezapisane zmiany są zachowane.",
+    save_landed: "Połączenie wróciło; plan został zapisany.",
+    draft_found: "W tej przeglądarce są niezapisane zmiany planu z {when}.",
+    draft_stale: "Plan na serwerze od tego czasu się zmienił; zapisanie przywróconego planu go zastąpi.",
+    draft_restore: "Przywróć",
+    draft_discard: "Odrzuć",
+    draft_restored: "Przywrócono niezapisane zmiany. Przejrzyj je i zapisz.",
+    draft_background_lost: "Tła z importu nie udało się zachować w przeglądarce; zaimportuj mapę ponownie, żeby je odzyskać.",
+    draft_restored_lost: "Przywrócono niezapisane zmiany bez tła z importu. Zaimportuj mapę ponownie, żeby je odzyskać.",
     reload: "Wczytaj tamten",
     overwrite: "Zostaw mój",
     no_bulb_to_place: "Najpierw wybierz żarówkę z listy.",
+    renamed_rooms: "{rooms}: pokój o tym id usunięto i zapisano, więc wraca jako nowy pokój. Home Assistant da mu nowe encje (nowe entity_id); popraw automatyzacje, które używały starych.",
+    conflict_removes: "„Zostaw mój” usunie: {rooms}.",
+    conflict_renames: "„Zostaw mój” da nowe id i nowe encje (nowe entity_id) pokojom: {rooms}.",
+    conflict_same: "„Zostaw mój” nie zmieni id żadnego pokoju.",
+    new_entities: "Zapisany plan miał pokój o tej nazwie i został on usunięty. Dla Home Assistant to nowy pokój: jego encje dostaną nowe identyfikatory ({entity}), więc automatyzacje, które używały starego pokoju, trzeba poprawić.",
+    save_invalid: "Nie zapisano planu: {message}",
     edit_selection: "Edytuj",
     rooms_count: { one: "{n} pokój", few: "{n} pokoje", many: "{n} pokojów", other: "{n} pokoju" },
     bulbs_count: { one: "{n} żarówka", few: "{n} żarówki", many: "{n} żarówek", other: "{n} żarówki" },
@@ -388,8 +500,20 @@ const GRIDS = [0.05, 0.1, 0.25];
 const WALL_KINDS: WallKind[] = ["partition", "brick", "concrete", "glass", "none"];
 const HEIGHTS: BulbHeight[] = ["ceiling", "pendant", "lamp"];
 const KEPT_BACKGROUNDS = 3;
+const BACKGROUND_KEY = "outglow.editor.background";
 const SHORTCUTS: Record<string, Tool> = { v: "select", r: "rect", p: "poly", d: "door", b: "bulb" };
 const RESIZE_KEYS: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+type PickKey = ["corner" | "wall", 1 | -1];
+const PICK_KEYS: Record<string, PickKey> = { ",": ["corner", -1], ".": ["corner", 1], "[": ["wall", -1], "]": ["wall", 1] };
+const PICK_CODES: Record<string, PickKey> = { Comma: ["corner", -1], Period: ["corner", 1], BracketLeft: ["wall", -1], BracketRight: ["wall", 1] };
+const OWN_KEYS = new Set(["Escape", "Enter", "Backspace", "Delete", "+", "=", "-", ...Object.keys(RESIZE_KEYS)]);
+
+function pickKey(event: KeyboardEvent): PickKey | null {
+  const free = !event.ctrlKey && !event.metaKey;
+  if (!free && !event.getModifierState("AltGraph")) return null;
+  const own = event.key.toLowerCase() in SHORTCUTS || OWN_KEYS.has(event.key);
+  return PICK_KEYS[event.key] ?? (own ? null : (PICK_CODES[event.code] ?? null));
+}
 
 export function exportName(now: Date): string {
   const pad = (n: number): string => String(n).padStart(2, "0");
@@ -420,7 +544,21 @@ export function warningText(loc: Parameters<typeof te>[0], warning: PlanWarning)
   return text.replace(/\{\w+\}/g, details || "?");
 }
 
+function wallEnds(plan: Plan, wall: number): [string, string] | undefined {
+  const order = (id: string): number => plan.rooms.findIndex((r) => r.id === id);
+  const ends = wallPairs(plan)[wall]?.split("|") as [string, string] | undefined;
+  return ends && (order(ends[0]) <= order(ends[1]) ? ends : [ends[1], ends[0]]);
+}
+
+function seriesId(selection: NonNullable<Selection>): string {
+  if (selection.kind === "wall") return `wall:${selection.pair}`;
+  if (selection.kind === "door") return `door:${selection.pair}:${selection.index}`;
+  if (selection.kind === "vertex") return `vertex:${selection.id}:${selection.index}`;
+  return selection.kind === "room" ? `room:${selection.id}` : `bulb:${selection.ieee}`;
+}
+
 interface KeyRun {
+  family: string;
   key: string;
   base: Plan;
   selection: Selection;
@@ -463,8 +601,14 @@ export class OutglowPlanEditor extends ViewBase {
     _armed: { state: true },
     _narrowDismissed: { state: true },
     _notice: { state: true },
+    _speak: { state: true },
     _menuOpen: { state: true },
     _exportCopy: { state: true },
+    _renamedNotice: { state: true },
+    _keepMine: { state: true },
+    reserved: { attribute: false },
+    _showBackground: { state: true },
+    _drafts: { state: true },
   };
 
   declare _version: number;
@@ -475,7 +619,7 @@ export class OutglowPlanEditor extends ViewBase {
   declare _magnet: boolean;
   declare _keepRatio: boolean;
   declare _saving: boolean;
-  declare _conflict: boolean;
+  declare _conflict: "save" | "remote" | null;
   declare _importOpen: boolean;
   declare _importKeep: boolean;
   declare _robots: ValetudoRobotsResponse | null;
@@ -488,14 +632,29 @@ export class OutglowPlanEditor extends ViewBase {
   declare _armed: string | null;
   declare _narrowDismissed: boolean;
   declare _notice: string | null;
+  declare _speak: boolean;
   declare _menuOpen: boolean;
   declare _exportCopy: { name: string; text: string } | null;
+  declare _renamedNotice: Renamed[];
+  declare _keepMine: { removes: string[]; renames: string[] } | null;
+  declare reserved: string[];
+  declare _showBackground: boolean;
+  declare _drafts: Draft[];
 
   private _history: History<Plan> | null = null;
   private _saved: Plan | null = null;
   private _backgrounds = new Map<string, BackgroundImage>();
+  private _storedBefore: string | null = null;
+  private _backgroundUrls = new WeakMap<BackgroundImage, string>();
+  private _savedBackdrop = new Backdrop(this);
+  private _drafted: Plan | null = null;
+  private _draftKey: string | null = null;
+  private _draftImage: string | null = null;
+  private _draftImages = new Map<string, BackgroundImage | null>();
+  private _sent: { plan: Plan; rev: number } | null = null;
   private _dirtySent = false;
   private _keyRun: KeyRun | null = null;
+  private _wallRoom: string | null = null;
 
   constructor() {
     super();
@@ -507,7 +666,8 @@ export class OutglowPlanEditor extends ViewBase {
     this._magnet = true;
     this._keepRatio = false;
     this._saving = false;
-    this._conflict = false;
+    this._conflict = null;
+    this._drafts = [];
     this._importOpen = false;
     this._importKeep = true;
     this._robots = null;
@@ -516,12 +676,17 @@ export class OutglowPlanEditor extends ViewBase {
     this._importResult = null;
     this._importError = null;
     this._importBusy = false;
+    this._renamedNotice = [];
+    this._keepMine = null;
+    this.reserved = [];
     this._listDrag = null;
     this._armed = null;
     this._narrowDismissed = false;
     this._notice = null;
+    this._speak = false;
     this._menuOpen = false;
     this._exportCopy = null;
+    this._showBackground = readFlag(BACKGROUND_KEY, true);
     this.addEventListener("keydown", (e) => this._key(e));
   }
 
@@ -1028,15 +1193,153 @@ export class OutglowPlanEditor extends ViewBase {
       if (!this._history) {
         this._history = new History(plan, 100, samePlan);
         this._saved = plan;
-      } else if (plan !== this._saved && !this._dirty()) {
-        this._history.reset(plan);
-        this._saved = plan;
-        this._preview = null;
+        this._offerDrafts(plan);
+      } else if (plan !== this._saved) {
+        this._arrived(plan);
       }
+    }
+    const placed = this._history ? this._plan.background : null;
+    const local = placed ? this._backgrounds.has(placed.file) : false;
+    const saved = placed !== null && !local && this.plan?.background?.file === placed.file;
+    this._savedBackdrop.show(saved ? { hass: this.hass, file: placed.file } : null);
+  }
+
+  private _arrived(plan: Plan): void {
+    const history = this._history!;
+    if (this._ownSave(plan)) {
+      this._landed(plan);
+      return;
+    }
+    this._sent = null;
+    if (this._saved && sameContent(plan, this._saved)) {
+      if (this._dirty()) this.toast(te(this.loc, "reconnected_kept"));
+      else history.present = plan;
+      this._saved = plan;
+    } else if (!this._dirty()) {
+      history.reset(plan);
+      this._saved = plan;
+      this._storedBefore = null;
+      this._preview = null;
+    } else {
+      this._conflict = "remote";
     }
   }
 
+  private _ownSave(plan: Plan): boolean {
+    const sent = this._sent;
+    if (sent === null || plan.rev !== sent.rev + 1) return false;
+    const retired = new Set(plan.retired_rooms);
+    const expected = new Set([...sent.plan.retired_rooms, ...(this.reserved ?? [])]);
+    return (
+      sent.plan.retired_rooms.every((id) => retired.has(id)) &&
+      plan.retired_rooms.every((id) => expected.has(id)) &&
+      sameContent({ ...plan, retired_rooms: [] }, { ...sent.plan, retired_rooms: [] }, true)
+    );
+  }
+
+  private _landed(plan: Plan): void {
+    const sent = this._sent!;
+    this._sent = null;
+    if (samePlan(this._history!.present, sent.plan)) {
+      this._history!.present = plan;
+      this._history!.seal();
+    }
+    this._saved = plan;
+    this._conflict = null;
+    this.toast(te(this.loc, "save_landed"));
+  }
+
+  private get _scope(): string {
+    return this.info?.entry_id ?? "default";
+  }
+
+  private _offerDrafts(plan: Plan): void {
+    const found = listDrafts(this._scope, this._draftKey);
+    for (const draft of found.filter((d) => sameContent(d.plan, plan))) dropDraft(draft.key);
+    this._drafts = found.filter((d) => !sameContent(d.plan, plan));
+    for (const draft of this._drafts) {
+      if (draft.inline) this._draftImages.set(draft.key, draft.inline);
+      else if (draft.image) {
+        void getImage(draft.key, draft.image).then((image) => {
+          this._draftImages.set(draft.key, image);
+          this.requestUpdate();
+        });
+      }
+    }
+    void sweepImages();
+  }
+
+  private _keepDraft(): void {
+    const present = this._history?.present ?? null;
+    if (!present || present === this._drafted) return;
+    if (!this._dirty()) {
+      if (this._drafted && this._draftKey) dropDraft(this._draftKey);
+      this._drafted = null;
+      this._draftImage = null;
+      return;
+    }
+    this._drafted = present;
+    const key = (this._draftKey ??= draftKey(this._scope));
+    const imageKey = present.background ? present.background.file : null;
+    const image = imageKey ? this._backgrounds.get(imageKey) : undefined;
+    const local = imageKey && image ? imageKey : null;
+    saveDraft(key, this.rev, present, local);
+    if (local && image && local !== this._draftImage) {
+      this._draftImage = local;
+      void putImage(key, local, image);
+    }
+  }
+
+  private _draftBackground(draft: Draft): "kept" | "lost" | "pending" {
+    const placed = draft.plan.background;
+    if (!placed) return "kept";
+    if (draft.image) {
+      if (!this._draftImages.has(draft.key)) return "pending";
+      if (this._draftImages.get(draft.key)) return "kept";
+    }
+    return placed.file === this.plan?.background?.file ? "kept" : "lost";
+  }
+
+  private async _restoreDraft(draft: Draft): Promise<void> {
+    if (!this._history) return;
+    const placed = draft.plan.background;
+    const image = draft.image ? (draft.inline ?? this._draftImages.get(draft.key) ?? (await getImage(draft.key, draft.image))) : null;
+    if (draft.image && image) this._backgrounds.set(draft.image, image);
+    const lost = placed !== null && !image && placed.file !== this.plan?.background?.file;
+    const background = lost ? (this._saved?.background ?? null) : placed;
+    this._drafts = this._drafts.filter((d) => d !== draft);
+    this._commit({ ...draft.plan, rev: this._history.present.rev, background }, null, null);
+    dropDraft(draft.key);
+    this._draftImages.delete(draft.key);
+    this.toast(te(this.loc, lost ? "draft_restored_lost" : "draft_restored"));
+    void this.updateComplete.then(() => this._canvas?.fit());
+  }
+
+  private _discardDraft(draft: Draft): void {
+    this._drafts = this._drafts.filter((d) => d !== draft);
+    this._draftImages.delete(draft.key);
+    dropDraft(draft.key);
+  }
+
+  private _backgroundUrl(): string | null {
+    const placed = this._plan.background;
+    if (!this._showBackground || !placed) return null;
+    const image = this._backgrounds.get(placed.file);
+    if (!image) return this._savedBackdrop.url;
+    const known = this._backgroundUrls.get(image);
+    if (known) return known;
+    const url = imageUrl(image);
+    this._backgroundUrls.set(image, url);
+    return url;
+  }
+
+  private _toggleBackground(): void {
+    this._showBackground = !this._showBackground;
+    writeFlag(BACKGROUND_KEY, this._showBackground);
+  }
+
   override updated(): void {
+    this._keepDraft();
     const dirty = this._dirty();
     if (dirty !== this._dirtySent) {
       this._dirtySent = dirty;
@@ -1073,13 +1376,13 @@ export class OutglowPlanEditor extends ViewBase {
   private _commit(plan: Plan, key: string | null = null, selection: Selection = this._selection): void {
     if (!this._history) return;
     this._preview = null;
-    this._history.push(plan, key);
-    this._selection = trackSelection(this._history.present, selection);
+    const before = this._history.present;
+    this._history.push(retireGone(plan, this._saved), key);
+    this._selection = trackSelection(this._history.present, selection, before);
     this._version += 1;
   }
 
-  private _watch(plan: Plan): void {
-    const before = this._history?.present;
+  private _watch(plan: Plan, before: Plan | undefined = this._history?.present): void {
     const moved = before ? movedBulbs(before, plan) : [];
     const loc = this.loc;
     const first = moved[0];
@@ -1089,8 +1392,12 @@ export class OutglowPlanEditor extends ViewBase {
       : moved.length === 1
         ? [te(loc, "bulb_moved", { bulb: this.bulbName(first.ieee), from: place(first.from), to: place(first.to) })]
         : [te(loc, "bulb_moved_many", { bulbs: moved.map((k) => this.bulbName(k.ieee)).join(", ") })];
-    const doors = before ? lostDoors(before, plan).map(([a, b]) => te(loc, "door_lost", { a: this.roomName(a), b: this.roomName(b) })) : [];
-    const notes = [...bulbs, ...doors];
+    const unpinned = before ? unpinnedBulbs(before, plan).map((k) => te(loc, "bulb_unpinned", { bulb: this.bulbName(k.ieee), from: place(k.from), to: place(k.to) })) : [];
+    const touching = new Set(wallPairs(plan));
+    const doors = before
+      ? lostDoors(before, plan).map(([a, b]) => te(loc, touching.has(pairKey([a, b])) ? "door_squeezed" : "door_lost", { a: this.roomName(a), b: this.roomName(b) }))
+      : [];
+    const notes = [...bulbs, ...unpinned, ...doors];
     this._notice = notes.length ? notes.join(" ") : null;
   }
 
@@ -1098,23 +1405,42 @@ export class OutglowPlanEditor extends ViewBase {
     if (!this._history?.canUndo) return;
     this._canvas?.cancel();
     this._preview = null;
-    const plan = this._history.undo();
-    this._selection = trackSelection(plan, this._selection);
-    this._notice = null;
-    this._version += 1;
+    const before = this._history.present;
+    this._revive(before, this._history.undo());
   }
 
   private _redo(): void {
     if (!this._history?.canRedo) return;
     this._preview = null;
-    const plan = this._history.redo();
-    this._selection = trackSelection(plan, this._selection);
+    const before = this._history.present;
+    this._revive(before, this._history.redo());
+  }
+
+  private _revive(before: Plan, restored: Plan): void {
+    const { plan, renamed } = reviveRetired(restored, this._saved?.retired_rooms ?? []);
+    if (this._history) this._history.present = plan;
+    if (this._selection?.kind === "room" || this._selection?.kind === "vertex") {
+      const id = this._selection.id;
+      const moved = renamed.find((r) => r.from === id);
+      if (moved) this._selection = { ...this._selection, id: moved.to };
+    }
+    this._selection = trackSelection(plan, this._selection, before);
     this._notice = null;
+    this._warnRenamed(renamed);
     this._version += 1;
+  }
+
+  private _renamedText(renamed: Renamed[]): string[] {
+    return renamed.length ? [te(this.loc, "renamed_rooms", { rooms: renamed.map((r) => r.name).join(", ") })] : [];
+  }
+
+  private _warnRenamed(renamed: Renamed[]): void {
+    for (const text of this._renamedText(renamed)) this.toast(text);
   }
 
   private _setTool(tool: Tool): void {
     this._tool = tool;
+    this._speak = false;
     if (tool === "bulb" && !this._armed) {
       this._armed = this._unplaced()[0]?.ieee ?? null;
     }
@@ -1145,12 +1471,18 @@ export class OutglowPlanEditor extends ViewBase {
       void this._save();
       return;
     }
+    const pick = pickKey(event);
+    if (pick) {
+      if (this._tool !== "select" || !(pick[0] === "corner" ? this._pickCorner(pick[1]) : this._pickWall(pick[1]))) return;
+      event.preventDefault();
+      return;
+    }
     if (event.altKey && !mod && this._selection?.kind === "room" && event.key in RESIZE_KEYS) {
       event.preventDefault();
       const id = this._selection.id;
       const step = this._grid * (event.shiftKey ? 10 : 1);
       const [dw, dh] = RESIZE_KEYS[event.key]!;
-      this._keyStep(`resize:${id}`, [dw * step, dh * step], (base, _, [tw, th]) => {
+      this._keyStep("resize", id, [dw * step, dh * step], (base, _, [tw, th]) => {
         const room = base.rooms.find((r) => r.id === id);
         if (!room) return base;
         const [x, y, w, h] = boxOf(room.outline);
@@ -1173,6 +1505,7 @@ export class OutglowPlanEditor extends ViewBase {
     switch (event.key) {
       case "Escape":
         if (canvas?.cancel()) break;
+        this._speak = false;
         if (this._tool !== "select") this._setTool("select");
         else this._selection = null;
         break;
@@ -1183,6 +1516,10 @@ export class OutglowPlanEditor extends ViewBase {
       case "Delete":
         if (event.key === "Backspace" && canvas?.dropPoint()) break;
         if (!this._selection) return;
+        if (this._selection.kind === "vertex") {
+          this._removeCorner(this._selection.id, this._selection.index, true);
+          break;
+        }
         this._commit(remove(this._plan, this._selection));
         this._selection = null;
         break;
@@ -1201,9 +1538,7 @@ export class OutglowPlanEditor extends ViewBase {
         const step = this._grid * (event.shiftKey ? 10 : 1);
         const delta: Point =
           event.key === "ArrowLeft" ? [-step, 0] : event.key === "ArrowRight" ? [step, 0] : event.key === "ArrowUp" ? [0, -step] : [0, step];
-        this._keyStep(`nudge:${this._selection.kind === "wall" ? this._selection.pair : JSON.stringify(this._selection)}`, delta, (base, selection, total) =>
-          nudge(base, selection, total),
-        );
+        this._keyStep("nudge", seriesId(this._selection), delta, (base, selection, total) => nudge(base, selection, total));
         break;
       }
       default:
@@ -1212,16 +1547,140 @@ export class OutglowPlanEditor extends ViewBase {
     event.preventDefault();
   }
 
-  private _keyStep(key: string, step: Point, run: (base: Plan, selection: Selection, total: Point) => Plan): void {
+  private _keyStep(family: string, id: string, step: Point, run: (base: Plan, selection: Selection, total: Point) => Plan): void {
     if (!this._history) return;
     const last = this._keyRun;
-    const going = last?.key === key && last.after === this._selection && this._history.key === key ? last : null;
-    const start = going ?? { key, base: this._plan, selection: this._selection, total: [0, 0] as Point, after: null };
+    const going = last?.family === family && last.after === this._selection && this._history.key === last.key ? last : null;
+    const start = going ?? { family, key: `${family}:${id}`, base: this._plan, selection: this._selection, total: [0, 0] as Point, after: null };
     const total = add(start.total, step);
     const next = run(start.base, start.selection, total);
-    this._watch(next);
-    this._commit(next, key, nudgeSelection(start.base, next, start.selection, total) ?? this._selection);
+    if (next === start.base && Math.hypot(total[0], total[1]) > 1e-9) return;
+    this._watch(next, start.base);
+    this._commit(next, start.key, nudgeSelection(start.base, next, start.selection, total) ?? this._selection);
     this._keyRun = { ...start, total, after: this._selection };
+  }
+
+  private _removeCorner(id: string, index: number, keyboard = false): void {
+    const next = cutCorner(this._plan, id, index);
+    if (typeof next === "string") {
+      this._selection = vertexSelection(this._plan, id, index);
+      this._notice = te(this.loc, `corner_${next}`);
+      return;
+    }
+    this._watch(next);
+    this._commit(next, null, { kind: "room", id });
+    this._canvas?.focusPlan(keyboard);
+  }
+
+  private _liveAreas(): ReadonlySet<string> | null {
+    const areas = this.hass?.areas;
+    return areas ? new Set(Object.values(areas).map((a) => a.area_id)) : null;
+  }
+
+  private _areaName(id: string): string {
+    return Object.values(this.hass?.areas ?? {}).find((a) => a.area_id === id)?.name ?? id;
+  }
+
+  private _mergeTrouble(plan: Plan, a: string, b: string): string | null {
+    const trouble = mergeTrouble(plan, a, b);
+    const sides = mergeSides(plan, a, b);
+    if (!trouble) return null;
+    const names = { inner: this.roomName(sides?.gone.id), outer: this.roomName(sides?.keep.id) };
+    return te(this.loc, trouble === "hole" ? "merge_failed" : `merge_${trouble}`, names);
+  }
+
+  private _mergeAreaNotes(plan: Plan, a: string, b: string): { area: string | null; bulbs: string | null } {
+    const sides = mergeSides(plan, a, b);
+    if (!sides) return { area: null, bulbs: null };
+    const { keep, gone } = sides;
+    const loc = this.loc;
+    const kept = mergedArea(keep, gone, this._liveAreas());
+    const lost = gone.area_id && gone.area_id !== kept ? gone.area_id : null;
+    const names = { keep: keep.name, gone: gone.name, area: kept ? this._areaName(kept) : "", gone_area: lost ? this._areaName(lost) : "" };
+    const note = lost && kept ? te(loc, "merge_area_drops", names) : kept && kept === gone.area_id && keep.area_id !== kept ? te(loc, "merge_area_takes", names) : null;
+    const placed = new Set(plan.bulbs.map((x) => x.ieee));
+    const stray = lost ? this.bulbs.filter((x) => x.area_id === lost && !placed.has(x.ieee)) : [];
+    const bulbs = stray.length && kept ? te(loc, "merge_area_bulbs", { ...names, n: stray.length, bulbs: stray.map((x) => this.bulbName(x.ieee)).join(", ") }) : null;
+    return { area: note, bulbs };
+  }
+
+  private _merge(a: string, b: string, keyboard = false): void {
+    const plan = this._plan;
+    const result = mergeRooms(plan, a, b, this._liveAreas());
+    if (!result) {
+      this._notice = this._mergeTrouble(plan, a, b);
+      return;
+    }
+    const loc = this.loc;
+    const keep = this.roomName(result.id);
+    const gone = this.roomName(result.id === a ? b : a);
+    const { bulbs } = this._mergeAreaNotes(plan, a, b);
+    this._commit(result.plan, null, { kind: "room", id: result.id });
+    const mixed = result.mixed.map((m) => te(loc, "wall_mixed", { a: keep, b: this.roomName(m.room), kind: te(loc, `kind_${m.kind}`) }));
+    this._notice = [te(loc, "rooms_merged", { gone, keep }), ...mixed, ...(bulbs ? [bulbs] : [])].join(" ");
+    this._canvas?.focusPlan(keyboard);
+  }
+
+  private _roomWalls(plan: Plan, id: string): number[] {
+    return wallPairs(plan).flatMap((key, i) => (key?.split("|").includes(id) ? [i] : []));
+  }
+
+  private _spoken(): string {
+    const sel = this._selection;
+    const plan = this._history?.present;
+    if (!this._speak || !plan) return "";
+    const loc = this.loc;
+    if (sel?.kind === "vertex") {
+      const room = plan.rooms.find((r) => r.id === sel.id);
+      const point = room?.outline[sel.index];
+      return room && point ? te(loc, "corner_picked", { n: sel.index + 1, room: room.name, x: fmtNumber(loc, point[0], 2), y: fmtNumber(loc, point[1], 2) }) : "";
+    }
+    if (sel?.kind !== "wall") return "";
+    const index = wallIndex(plan, sel);
+    const ends = wallEnds(plan, index);
+    const wall = plan.walls[index];
+    if (!ends || !wall) return "";
+    const id = ends.includes(this._wallRoom ?? "") ? this._wallRoom! : ends[0];
+    const walls = this._roomWalls(plan, id);
+    return te(loc, "wall_picked", {
+      k: walls.indexOf(index) + 1,
+      n: walls.length,
+      room: this.roomName(id),
+      a: this.roomName(ends[0]),
+      b: this.roomName(ends[1]),
+      length: fmtNumber(loc, dist(wall.a, wall.b), 2),
+    });
+  }
+
+  private _pickCorner(step: 1 | -1): boolean {
+    const sel = this._selection;
+    const room = sel?.kind === "room" || sel?.kind === "vertex" ? this._plan.rooms.find((r) => r.id === sel.id) : undefined;
+    if (!room) return false;
+    const n = room.outline.length;
+    const from = sel?.kind === "vertex" ? sel.index : step > 0 ? -1 : 0;
+    const index = (from + step + n) % n;
+    this._selection = vertexSelection(this._plan, room.id, index);
+    this._notice = null;
+    this._speak = true;
+    return true;
+  }
+
+  private _pickWall(step: 1 | -1): boolean {
+    const sel = this._selection;
+    const plan = this._plan;
+    const pairs = wallPairs(plan);
+    const current = sel?.kind === "wall" ? wallIndex(plan, sel) : -1;
+    const ends = pairs[current]?.split("|") ?? [];
+    const id = sel?.kind === "room" || sel?.kind === "vertex" ? sel.id : ends.includes(this._wallRoom ?? "") ? this._wallRoom : ends[0];
+    const walls = id ? this._roomWalls(plan, id) : [];
+    if (!id || walls.length === 0) return false;
+    const from = current >= 0 ? walls.indexOf(current) : step > 0 ? -1 : 0;
+    const index = walls[(from + step + walls.length) % walls.length]!;
+    this._wallRoom = id;
+    this._selection = wallSelection(plan, index);
+    this._notice = null;
+    this._speak = true;
+    return true;
   }
 
   private _unplaced() {
@@ -1309,8 +1768,10 @@ export class OutglowPlanEditor extends ViewBase {
     }
   }
 
-  private async _upload(plan: Plan): Promise<BackgroundUpload | null> {
-    const image = plan.background ? this._backgrounds.get(backgroundKey(plan.background)) : undefined;
+  private async _upload(plan: Plan, always: boolean): Promise<BackgroundUpload | null> {
+    const file = plan.background?.file;
+    const stored = file === this._saved?.background?.file || file === this._storedBefore;
+    const image = file && (always || !stored) ? this._backgrounds.get(file) : undefined;
     if (!image) return null;
     const packed = toBase64(await deflate(fromBase64(image.data_base64)));
     if (!fits(packed.length, utf8Length(JSON.stringify(plan)))) {
@@ -1322,24 +1783,51 @@ export class OutglowPlanEditor extends ViewBase {
   private async _save(force = false): Promise<void> {
     if (!this._history || this._saving || (!force && !this._dirty())) return;
     this._saving = true;
-    const plan = this._history.present;
+    const before = this._saved ?? this._history.present;
     let rev = this.rev;
+    let storedFile = this._saved?.background?.file ?? null;
     try {
+      let retired = before.retired_rooms;
       if (force) {
-        rev = (await this.call("outglow/plan/get", {})).rev;
+        const server = await this.call("outglow/plan/get", {});
+        rev = server.rev;
+        retired = retiredOver(before, server.plan);
+        storedFile = server.plan.background?.file ?? null;
       }
-      const background_image = await this._upload(plan);
-      const result = await this.call("outglow/plan/save", { rev, plan: { ...plan, rev }, background_image });
-      const saved: Plan = { ...plan, rev: result.rev, background: result.background };
+      const { plan, renamed } = reviveRetired(retireGone(this._history.present, before), retired);
+      if (renamed.length) this._history.push(plan);
+      let background_image = await this._upload(plan, force);
+      this._sent = { plan, rev };
+      let result = await this.call("outglow/plan/save", { rev, plan: { ...plan, rev }, background_image });
+      if (plan.background && !result.background && !background_image) {
+        background_image = await this._upload(plan, true);
+        if (background_image) {
+          storedFile = null;
+          this._sent = { plan, rev: result.rev };
+          result = await this.call("outglow/plan/save", { rev: result.rev, plan: { ...plan, rev: result.rev }, background_image });
+        }
+      }
+      this._sent = null;
+      this._renamedNotice = renamed;
+      if (this._saved?.rev === result.rev) return;
+      const lost = Boolean(plan.background && !result.background);
+      const saved: Plan = { ...plan, rev: result.rev, background: result.background, retired_rooms: result.retired_rooms };
+      this._storedBefore = lost ? null : storedFile;
       this._history.present = saved;
       this._history.seal();
       this._saved = saved;
-      this._conflict = false;
+      this._conflict = null;
+      this._keepMine = null;
       this.planSaved(saved, result.rev);
-      this.toast(te(this.loc, "saved"));
+      this.toast(te(this.loc, lost ? "background_lost" : "saved"));
     } catch (err) {
-      if (errorCode(err) === "rev_conflict") {
-        this._conflict = true;
+      const code = errorCode(err);
+      if (code === "rev_conflict") {
+        this._sent = null;
+        this._conflict = "save";
+        void this._previewKeepMine(before);
+      } else if (code === "invalid_format") {
+        this.toast(te(this.loc, "save_invalid", { message: String((err as { message?: string }).message ?? "") }), true);
       } else {
         this.fail(err);
       }
@@ -1349,14 +1837,39 @@ export class OutglowPlanEditor extends ViewBase {
     }
   }
 
+  private async _previewKeepMine(before: Plan): Promise<void> {
+    this._keepMine = null;
+    try {
+      const server = (await this.call("outglow/plan/get", {})).plan;
+      if (!this._history) return;
+      const { plan, renamed } = reviveRetired(retireGone(this._history.present, before), retiredOver(before, server));
+      const kept = new Set(plan.rooms.map((r) => r.id));
+      this._keepMine = { removes: server.rooms.filter((r) => !kept.has(r.id)).map((r) => r.name), renames: renamed.map((r) => r.name) };
+    } catch {
+      this._keepMine = null;
+    }
+  }
+
+  private _keepMineText(): string[] {
+    const info = this._keepMine;
+    if (!info) return [];
+    const out: string[] = [];
+    if (info.removes.length) out.push(te(this.loc, "conflict_removes", { rooms: info.removes.join(", ") }));
+    out.push(info.renames.length ? te(this.loc, "conflict_renames", { rooms: info.renames.join(", ") }) : te(this.loc, "conflict_same"));
+    return out;
+  }
+
   private async _reload(): Promise<void> {
     try {
       const result = await this.call("outglow/plan/get", {});
+      this.reserved = result.reserved_rooms;
       this._history?.reset(result.plan);
       this._saved = result.plan;
+      this._storedBefore = null;
       this._preview = null;
       this._selection = null;
-      this._conflict = false;
+      this._conflict = null;
+      this._keepMine = null;
       this.planSaved(result.plan, result.rev);
       this._version += 1;
       await this.updateComplete;
@@ -1441,19 +1954,20 @@ export class OutglowPlanEditor extends ViewBase {
   private async _useImport(): Promise<void> {
     const result = this._importResult;
     if (!result) return;
-    const plan = result.plan;
-    if (result.background_image && plan.background) {
-      this._backgrounds.delete(backgroundKey(plan.background));
-      this._backgrounds.set(backgroundKey(plan.background), result.background_image);
+    const imported = result.plan;
+    if (result.background_image && imported.background) {
+      this._backgrounds.delete(imported.background.file);
+      this._backgrounds.set(imported.background.file, result.background_image);
       while (this._backgrounds.size > KEPT_BACKGROUNDS) this._backgrounds.delete(this._backgrounds.keys().next().value!);
     }
-    this._commit(importPlan(this._plan, plan));
+    const { plan, renamed } = importPlan(this._plan, imported, this._saved);
+    this._commit(plan);
     this._selection = null;
     this._importOpen = false;
     this._importResult = null;
     this._importText = "";
     this._robots = null;
-    this.toast(te(this.loc, "imported"));
+    this.toast([te(this.loc, "imported"), ...this._renamedText(renamed)].join(" "));
     await this.updateComplete;
     this._canvas?.fit();
   }
@@ -1461,7 +1975,10 @@ export class OutglowPlanEditor extends ViewBase {
   private _keptText(): string {
     const kept = this._importResult?.kept;
     if (!kept) return "";
-    if (!kept.aligned) return te(this.loc, kept.rooms === 1 ? "kept_one_room" : "kept_unaligned", { bulbs: kept.bulbs });
+    if (!kept.aligned) {
+      const key = kept.rooms === 1 ? "kept_one_room" : kept.rooms === 2 ? "kept_two_rooms" : "kept_unaligned";
+      return te(this.loc, key, { bulbs: kept.bulbs });
+    }
     return te(this.loc, "kept_aligned", {
       bulbs: kept.bulbs,
       rooms: kept.rooms,
@@ -1540,11 +2057,33 @@ export class OutglowPlanEditor extends ViewBase {
             <button class="btn" @click=${() => (this._narrowDismissed = true)}>${te(loc, "dismiss")}</button>
           </div>`
         : nothing}
+      ${this._renamedNotice.length
+        ? html`<div class="notice warning banner renamed" role="alert">
+            ${icon(mdiAlert, 20)}
+            <div class="grow">${this._renamedText(this._renamedNotice)}</div>
+            <button class="btn" @click=${() => (this._renamedNotice = [])}>${te(loc, "dismiss")}</button>
+          </div>`
+        : nothing}
+      ${this._drafts.map(
+        (draft) => html`<div class="notice info banner" role="alert" data-notice="draft">
+          ${icon(mdiRestore, 20)}
+          <div class="grow">
+            ${te(loc, "draft_found", { when: fmtDateTime(loc, draft.at / 1000) })}
+            ${draft.rev !== this.rev ? html` ${te(loc, "draft_stale")}` : nothing}
+            ${this._draftBackground(draft) === "lost" ? html` ${te(loc, "draft_background_lost")}` : nothing}
+            <div class="actions">
+              <button class="btn tonal" data-action="draft-restore" @click=${() => void this._restoreDraft(draft)}>${icon(mdiRestore, 18)} ${te(loc, "draft_restore")}</button>
+              <button class="btn outlined neutral" data-action="draft-discard" @click=${() => this._discardDraft(draft)}>${te(loc, "draft_discard")}</button>
+            </div>
+          </div>
+        </div>`,
+      )}
       ${this._conflict
-        ? html`<div class="notice warning banner" role="alert">
+        ? html`<div class="notice warning banner" role="alert" data-notice="conflict">
             ${icon(mdiAlert, 20)}
             <div class="grow">
-              ${te(loc, "conflict")}
+              ${te(loc, this._conflict === "remote" ? "conflict_remote" : "conflict")}
+              ${this._keepMineText().map((text) => html`<div class="keep-mine">${text}</div>`)}
               <div class="actions">
                 <button class="btn tonal" @click=${() => void this._reload()}>${icon(mdiRefresh, 18)} ${te(loc, "reload")}</button>
                 <button class="btn outlined neutral" @click=${() => void this._save(true)}>${te(loc, "overwrite")}</button>
@@ -1556,6 +2095,8 @@ export class OutglowPlanEditor extends ViewBase {
         <section class="card canvas-card" aria-label=${te(loc, "title")}>
           <outglow-editor-canvas
             .plan=${plan}
+            .background=${this._backgroundUrl()}
+            .dark=${this.dark}
             .tool=${this._tool}
             .grid=${this._grid}
             .magnet=${this._magnet}
@@ -1565,16 +2106,20 @@ export class OutglowPlanEditor extends ViewBase {
             .ghost=${ghost}
             .flagged=${flagged}
             .keepRatio=${this._keepRatio}
+            .reserved=${this.reserved}
             @edit=${this._onEdit}
             @select=${(e: CustomEvent<{ selection: Selection }>) => {
               this._selection = e.detail.selection;
               this._notice = null;
+              this._speak = false;
             }}
             @tool=${(e: CustomEvent<{ tool: Tool }>) => this._setTool(e.detail.tool)}
             @place=${this._onPlace}
+            @remove-corner=${(e: CustomEvent<{ id: string; index: number }>) => this._removeCorner(e.detail.id, e.detail.index)}
           ></outglow-editor-canvas>
           <div class="hint ${this._notice ? "warning" : ""}">
-            ${icon(this._notice ? mdiAlert : mdiInformation, 18)}<span role="status">${this._notice ?? this._hint()}</span>
+            ${icon(this._notice ? mdiAlert : mdiInformation, 18)}<span class="hint-text">${this._notice ?? this._hint()}</span>
+            <span class="sr-only" role="status">${this._notice ?? (this._spoken() || this._hint())}</span>
             ${this._selection
               ? html`<button class="btn tonal to-inspector" @click=${() => this.renderRoot.querySelector(".inspector")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
                   ${te(loc, "edit_selection")}
@@ -1602,10 +2147,9 @@ export class OutglowPlanEditor extends ViewBase {
       const ieee = this._armed ?? this._unplaced()[0]?.ieee;
       return ieee ? te(loc, "hint_bulb", { name: this.bulbName(ieee) }) : te(loc, "hint_bulb_none");
     }
-    if (this._tool === "select" && this._selection?.kind === "room") {
-      const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
-      return te(loc, touch ? "hint_room_touch" : "hint_room");
-    }
+    const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+    if (this._tool === "select" && this._selection?.kind === "room") return te(loc, touch ? "hint_room_touch" : "hint_room");
+    if (this._tool === "select" && this._selection?.kind === "vertex") return te(loc, touch ? "hint_vertex_touch" : "hint_vertex");
     if (this._tool === "select" && this._selection?.kind === "wall") return te(loc, "hint_wall");
     return te(loc, `hint_${this._tool}`);
   }
@@ -1700,6 +2244,7 @@ export class OutglowPlanEditor extends ViewBase {
 
   override connectedCallback(): void {
     super.connectedCallback();
+    keepAlive();
     window.addEventListener("pointerdown", this._outside, true);
   }
 
@@ -1756,6 +2301,10 @@ export class OutglowPlanEditor extends ViewBase {
         @click=${() => (this._magnet = !this._magnet)}>${icon(mdiMagnet)}</button>
       <button class="icon-btn" data-action="keep-ratio" aria-pressed=${this._keepRatio} title=${te(loc, "keep_ratio")} aria-label=${te(loc, "keep_ratio")}
         @click=${() => (this._keepRatio = !this._keepRatio)}>${icon(mdiAspectRatio)}</button>
+      ${this._plan.background
+        ? html`<button class="icon-btn" data-action="background" aria-pressed=${this._showBackground} title=${te(loc, "background_layer")}
+            aria-label=${te(loc, "background_layer")} @click=${() => this._toggleBackground()}>${icon(mdiImage)}</button>`
+        : nothing}
       <span class="spacer"></span>
       ${dirty ? html`<span class="state"><span class="dot"></span>${te(loc, "unsaved")}</span>` : nothing}
       <button class="btn tonal wide-only" aria-label=${te(loc, "import")} title=${te(loc, "import")} @click=${() => (this._importOpen = true)}>
@@ -1784,6 +2333,7 @@ export class OutglowPlanEditor extends ViewBase {
     const sel = this._selection;
     if (sel?.kind === "room") return this._roomInspector(plan, sel.id);
     if (sel?.kind === "wall") return this._wallInspector(plan, wallIndex(plan, sel));
+    if (sel?.kind === "vertex") return this._vertexInspector(plan, sel.id, sel.index);
     if (sel?.kind === "door") return this._doorInspector(plan, sel.index);
     if (sel?.kind === "bulb") return this._bulbInspector(plan, sel.ieee);
     return this._roomsList(plan);
@@ -1828,6 +2378,9 @@ export class OutglowPlanEditor extends ViewBase {
           <input type="text" data-field="room-name" .value=${room.name}
             @input=${(e: Event) => this._commit(updateRoom(this._plan, id, { name: (e.target as HTMLInputElement).value }), `name:${id}`)} />
         </label>
+        ${looksRetired(room, [...(this._saved?.retired_rooms ?? []), ...plan.retired_rooms])
+          ? html`<div class="notice warning" role="note" data-field="new-entities">${icon(mdiAlert, 20)}<span>${te(loc, "new_entities", { entity: `binary_sensor.outglow_room_${room.id}_occupancy` })}</span></div>`
+          : nothing}
         <label class="field">${te(loc, "area")}
           <select @change=${(e: Event) => {
             const value = (e.target as HTMLSelectElement).value;
@@ -1877,6 +2430,30 @@ export class OutglowPlanEditor extends ViewBase {
       </div>`;
   }
 
+  private _vertexInspector(plan: Plan, id: string, index: number) {
+    const loc = this.loc;
+    const room = plan.rooms.find((r) => r.id === id);
+    const point = room?.outline[index];
+    if (!room || !point) return nothing;
+    const few = room.outline.length <= 3;
+    return html`<div class="card-head">
+        <span class="swatch" style="background:${room.colour};width:14px;height:14px;border-radius:4px"></span>
+        <h2 class="headline">${te(loc, "corner")}</h2>
+      </div>
+      <div class="section">
+        <div class="kv-line">
+          ${te(loc, "corner_of", { n: index + 1, room: room.name })}<br />
+          ${te(loc, "corner_at", { x: fmtNumber(loc, point[0], 2), y: fmtNumber(loc, point[1], 2) })}
+        </div>
+        ${few ? html`<p class="ok">${te(loc, "corner_min")}</p>` : nothing}
+        <div class="danger-row">
+          <button class="btn outlined danger" data-action="remove-corner" ?disabled=${few} @click=${(e: MouseEvent) => this._removeCorner(id, index, e.detail === 0)}>
+            ${icon(mdiDelete, 18)} ${te(loc, "remove_corner")}
+          </button>
+        </div>
+      </div>`;
+  }
+
   private _doorEdit(plan: Plan, index: number, key: string | null = null): void {
     this._commit(plan, key, doorSelection(plan, index));
   }
@@ -1885,12 +2462,16 @@ export class OutglowPlanEditor extends ViewBase {
     const loc = this.loc;
     const wall = plan.walls[index];
     if (!wall) return nothing;
-    const rooms = wallRooms(plan, wall);
+    const pair = wallEnds(plan, index);
     const length = dist(wall.a, wall.b);
+    const trouble = pair ? this._mergeTrouble(plan, pair[0], pair[1]) : null;
+    const sides = pair && !trouble ? mergeSides(plan, pair[0], pair[1]) : null;
+    const notes = pair && sides ? this._mergeAreaNotes(plan, pair[0], pair[1]) : null;
+    const loses = sides ? [te(loc, "merge_loses", { gone: this.roomName(sides.gone.id) }), notes?.area, notes?.bulbs].filter(Boolean).join(" ") : null;
     return html`<div class="card-head"><h2 class="headline">${te(loc, "wall")}</h2></div>
       <div class="section">
         <div class="kv-line">
-          ${rooms.length >= 2 ? te(loc, "wall_between", { a: this.roomName(rooms[0]), b: this.roomName(rooms[1]) }) : nothing}<br />
+          ${pair ? te(loc, "wall_between", { a: this.roomName(pair[0]), b: this.roomName(pair[1]) }) : nothing}<br />
           ${te(loc, "wall_length", { n: fmtNumber(loc, length, 2) })}
         </div>
         <div style="display:grid;gap:8px">
@@ -1902,13 +2483,20 @@ export class OutglowPlanEditor extends ViewBase {
             )}
           </div>
         </div>
-        <div>
+        <div class="kv-line">${te(loc, "wall_delete")}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
           <button class="btn tonal" @click=${() => {
             const result = addDoor(this._plan, index, 0.5);
             this._commit(result.plan);
             this._selection = doorSelection(result.plan, result.index);
           }}>${icon(mdiDoor, 18)} ${te(loc, "add_door")}</button>
+          ${pair
+            ? html`<button class="btn tonal" data-action="merge-rooms" ?disabled=${Boolean(trouble)} aria-describedby="merge-note"
+                @click=${(e: MouseEvent) => this._merge(pair[0], pair[1], e.detail === 0)}>${icon(mdiVectorUnion, 18)} ${te(loc, "merge_rooms")}</button>`
+            : nothing}
         </div>
+        ${trouble ? html`<div class="kv-line merge-trouble" id="merge-note">${trouble}</div>` : nothing}
+        ${loses ? html`<div class="kv-line merge-loses" id="merge-note">${loses}</div>` : nothing}
       </div>`;
   }
 
@@ -1917,11 +2505,11 @@ export class OutglowPlanEditor extends ViewBase {
     const door = plan.doors[index];
     const wall = door ? plan.walls[door.wall] : undefined;
     if (!door || !wall) return nothing;
-    const rooms = wallRooms(plan, wall);
+    const pair = wallEnds(plan, door.wall);
     const kinds: DoorKind[] = ["door", "opening"];
     return html`<div class="card-head"><h2 class="headline">${te(loc, "door")}</h2></div>
       <div class="section">
-        ${rooms.length >= 2 ? html`<div class="kv-line">${te(loc, "wall_between", { a: this.roomName(rooms[0]), b: this.roomName(rooms[1]) })}</div>` : nothing}
+        ${pair ? html`<div class="kv-line">${te(loc, "wall_between", { a: this.roomName(pair[0]), b: this.roomName(pair[1]) })}</div>` : nothing}
         <div style="display:grid;gap:8px">
           <span class="eyebrow">${te(loc, "door_kind")}</span>
           <div class="segmented" role="radiogroup" aria-label=${te(loc, "door_kind")}>
@@ -2087,7 +2675,7 @@ export class OutglowPlanEditor extends ViewBase {
       <div class="import-body">
         <div class="row wrap">
           <span class="btn outlined neutral file">${icon(mdiFileUpload, 18)} ${te(loc, "choose_file")}
-            <input type="file" accept=".json,.yaml,.yml,application/json,text/yaml" aria-label=${te(loc, "choose_file")} @change=${this._readFile} />
+            <input type="file" aria-label=${te(loc, "choose_file")} @change=${this._readFile} />
           </span>
           <button class="btn outlined neutral" data-action="fetch-vacuum" ?disabled=${this._importBusy} @click=${() => void this._openRobots()}>
             ${icon(mdiRobotVacuum, 18)} ${te(loc, "fetch_vacuum")}
@@ -2141,8 +2729,21 @@ export class OutglowPlanEditor extends ViewBase {
   }
 }
 
-function backgroundKey(background: Background): string {
-  return JSON.stringify([background.file, background.x, background.y, background.m_per_px]);
+function readFlag(key: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : raw === "1";
+  } catch {
+    return fallback;
+  }
+}
+
+function writeFlag(key: string, value: boolean): void {
+  try {
+    localStorage.setItem(key, value ? "1" : "0");
+  } catch {
+    return;
+  }
 }
 
 if (!customElements.get("outglow-plan-editor")) {

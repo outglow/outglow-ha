@@ -59,7 +59,7 @@
         "information": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0}, "description": "KL divergence per room, nats"}
       }
     },
-    "RecommendationKind": {"enum": ["skip_direction", "raise_sensitivity", "weak_coverage", "more_empty_house", "frozen_direction", "no_bulbs"]},
+    "RecommendationKind": {"enum": ["skip_direction", "raise_sensitivity", "weak_coverage", "more_empty_house", "frozen_direction", "no_bulbs", "one_bulb"], "description": "one_bulb (rules mode, info): the room has a single bulb next to a room with pairs of its own; while someone moves there, it lights only when all of at least 3 lines from its bulb into that room move, and candidates mark where a second bulb would give it pairs of its own: spots at least 0.5 m from its walls (less in a room narrower than 1 m), 1 m apart, where the new pair with its bulb runs longest through the room (numbers.own_m, weighted 10 to 1), its lines to other bulbs breaking ties by their mean length in the room (numbers.lines_m: all the new lines in the room)"},
     "RecommendationAction": {"enum": ["skip_direction", "bulb_write", "wizard", "show_candidates", "none"]},
     "Recommendation": {
       "type": "object",

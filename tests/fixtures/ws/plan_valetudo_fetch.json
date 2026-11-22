@@ -13,7 +13,7 @@
       "north_deg": 0.0,
       "view_rotation_deg": 0.0,
       "background": {
-        "file": "plan.svg",
+        "file": "plan-dfd00878a8f94cd1.svg",
         "x": 4.65,
         "y": 4.65,
         "m_per_px": 0.05,
@@ -266,13 +266,6 @@
         "code": "room_without_bulb",
         "params": {
           "room": "room_7"
-        }
-      },
-      {
-        "code": "overlapping_rooms",
-        "params": {
-          "a": "hall",
-          "b": "room_7"
         }
       }
     ],

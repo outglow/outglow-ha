@@ -182,7 +182,8 @@
   "response": {
     "rev": 4,
     "warnings": [],
-    "background": null
+    "background": null,
+    "retired_rooms": []
   },
   "errors": [
     {

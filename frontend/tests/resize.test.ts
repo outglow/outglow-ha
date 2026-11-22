@@ -135,13 +135,13 @@ describe("resizing a room", () => {
     expect(next.doors).toHaveLength(2);
   });
 
-  it("leaves a door where it is when its wall does not move", () => {
+  it("leaves a door where it is when its wall does not move, inside what is left of the shared wall", () => {
     const next = resizeRoom(plan(), "living", [0, -1, 5, 5]);
     expect(doorCentre(next, next.doors[0]!)).toEqual([5, 2.4]);
     const inside = resizeRoom(plan(), "living", [0, 2, 5, 2]);
-    expect(doorCentre(inside, inside.doors[0]!)).toEqual([5, 2.4]);
+    expect(doorCentre(inside, inside.doors[0]!)).toEqual([5, 2.45]);
     const past = resizeRoom(plan(), "living", [0, 3, 5, 1]);
-    expect(doorCentre(past, past.doors[0]!)).toEqual([5, 3.6]);
+    expect(doorCentre(past, past.doors[0]!)).toEqual([5, 3.55]);
   });
 });
 

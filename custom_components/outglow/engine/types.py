@@ -37,13 +37,21 @@ EventKind = Literal[
     "model_apply",
     "model_discard",
     "model_rollback",
+    "model_reset",
+    "snapshot_delete",
     "session_start",
     "session_stop",
     "house_empty",
     "house_occupied",
 ]
 RecommendationKind = Literal[
-    "skip_direction", "raise_sensitivity", "weak_coverage", "more_empty_house", "frozen_direction", "no_bulbs"
+    "skip_direction",
+    "raise_sensitivity",
+    "weak_coverage",
+    "more_empty_house",
+    "frozen_direction",
+    "no_bulbs",
+    "one_bulb",
 ]
 RecommendationAction = Literal["skip_direction", "bulb_write", "wizard", "show_candidates", "none"]
 Severity = Literal["info", "warning"]
@@ -199,6 +207,7 @@ class Context:
     house_empty: HouseEmpty = "unknown"
     light_events: tuple[LightEvent, ...] = ()
     offline: frozenset[str] = frozenset()
+    cfar: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)

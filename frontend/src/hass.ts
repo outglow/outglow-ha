@@ -5,9 +5,13 @@ export interface HassMessage {
 
 export type Unsubscribe = () => Promise<void>;
 
+export type ConnectionEvent = "ready" | "disconnected";
+
 export interface HassConnection {
   sendMessagePromise<T>(message: HassMessage): Promise<T>;
   subscribeMessage<T>(callback: (event: T) => void, message: HassMessage): Promise<Unsubscribe>;
+  addEventListener?(event: ConnectionEvent, listener: () => void): void;
+  removeEventListener?(event: ConnectionEvent, listener: () => void): void;
 }
 
 export interface HassArea {

@@ -47,3 +47,20 @@ TWO = Plan(
     walls=(Wall(a=(4, 0), b=(4, 4), kind="brick"),),
     bulbs=(PlanBulb(ieee=B1, x=1, y=2), PlanBulb(ieee=B2, x=3, y=2), PlanBulb(ieee=B3, x=6, y=2, height="lamp")),
 )
+
+
+H0, H1, H2, H3, H4 = (f"0x{n:016x}" for n in (15, 11, 12, 13, 14))
+WIDE = Plan(
+    rooms=(
+        Room(id="hall", name="Hall", outline=square(0, 0, 4, 4)),
+        Room(id="office", name="Office", outline=square(4, 0, 7, 4)),
+    ),
+    adjacent=(("hall", "office"),),
+    bulbs=(
+        PlanBulb(ieee=H1, x=1, y=1),
+        PlanBulb(ieee=H2, x=3, y=1),
+        PlanBulb(ieee=H3, x=1, y=3),
+        PlanBulb(ieee=H4, x=3, y=3),
+        PlanBulb(ieee=H0, x=5.5, y=2),
+    ),
+)

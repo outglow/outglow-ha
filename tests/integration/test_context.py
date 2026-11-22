@@ -1,5 +1,6 @@
 from dataclasses import replace
 
+import pytest
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -152,13 +153,42 @@ async def test_persons_are_ignored_unless_enabled(
     await hass.async_block_till_done()
     assert empty_of(coordinator) == "no"
     await hass.async_block_till_done()
-    labels = await pending_labels(hass, coordinator)
-    assert [(lb.kind, lb.source, lb.t1 - lb.t0) for lb in labels] == [("empty", "empty_house", 700 - 240)]
+    assert await pending_labels(hass, coordinator) == []
+    assert await hass.async_add_executor_job(coordinator.history.empty_spans, 0, clock() + 1) != []
     await coordinator.async_flush_history()
     events = await hass.async_add_executor_job(
         coordinator.history.events, 0, clock() + 1, ["house_empty", "house_occupied"]
     )
     assert [e.kind for e in events] == ["house_empty", "house_occupied"]
+
+
+async def test_an_empty_house_is_learned_once_while_it_lasts(
+    hass: HomeAssistant, mqtt_mock: MqttMockHAClient, clock: Clock
+) -> None:
+    hass.states.async_set("person.a", "not_home")
+    _entry, coordinator = await setup_outglow(hass)
+    await with_plan(hass, coordinator)
+    await coordinator.async_update_settings(
+        lambda s: replace(s, global_=replace(s.global_, use_persons=True, persons=("person.a",)))
+    )
+    away = clock()
+    for _ in range(2 * 1200):
+        clock.advance(0.5)
+        coordinator.tick()
+    hass.states.async_set("person.a", "home")
+    await hass.async_block_till_done()
+    for _ in range(4):
+        clock.advance(0.5)
+        coordinator.tick()
+    await hass.async_block_till_done()
+    pending = coordinator.engine.model_state()["pending"]
+    assert isinstance(pending, dict)
+    seconds = pending["empty_s"]
+    assert isinstance(seconds, float)
+    assert seconds == pytest.approx(1200 - 600 - 2 * 120, abs=1)
+    assert pending["labels"] == {"empty_house": round(seconds / 0.5)}
+    spans = await hass.async_add_executor_job(coordinator.history.empty_spans, 0, clock() + 1)
+    assert spans == [(away + 120, away + 1200 - 120)]
 
 
 async def test_offline_bulbs_reach_the_engine_context(

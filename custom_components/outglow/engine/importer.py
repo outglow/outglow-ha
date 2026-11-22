@@ -2,7 +2,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TypeGuard
 
-from .topology import centroid, point_in_polygon
+from .topology import outlines_overlap, point_in_polygon
 from .types import ExcludedDirection, Json, Plan, PlanBulb, Point, Room
 
 PALETTE = ("#4e9af1", "#f28b30", "#42b883", "#b56cf0", "#e8c547", "#ef5b6c", "#3fc1c9", "#8d6e63")
@@ -111,7 +111,7 @@ def _checks(plan: Plan) -> list[dict[str, Json]]:
             out.append(warning("room_without_bulb", room=room.id))
     for i, a in enumerate(plan.rooms):
         for b in plan.rooms[i + 1 :]:
-            if point_in_polygon(centroid(a.outline), b.outline) or point_in_polygon(centroid(b.outline), a.outline):
+            if outlines_overlap(a.outline, b.outline):
                 out.append(warning("overlapping_rooms", a=a.id, b=b.id))
     return out
 

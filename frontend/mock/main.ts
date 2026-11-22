@@ -9,6 +9,7 @@ const panel = document.querySelector<OutglowPanel>("outglow-panel");
 const themeButton = document.querySelector<HTMLButtonElement>("#theme");
 const langButton = document.querySelector<HTMLButtonElement>("#lang");
 const backend = new MockBackend();
+Object.assign(window, { outglowMock: backend });
 if (params.has("shot")) {
   document.body.classList.add("shot");
 }
@@ -16,6 +17,7 @@ const latency = params.get("latency");
 if (latency !== null) {
   backend.latency = Number(latency);
 }
+backend.reserved = params.get("reserved")?.split(",") ?? [];
 
 let dark = params.get("theme") === "dark" || (params.get("theme") === null && matchMedia("(prefers-color-scheme: dark)").matches);
 let language = params.get("lang") ?? (navigator.language || "en");

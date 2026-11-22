@@ -44,6 +44,7 @@ Zigbee bulbs. Bulbs with the original firmware cannot sense motion.
 - [Troubleshooting and FAQ](#troubleshooting-and-faq)
 - [Privacy](#privacy)
 - [Limitations](#limitations)
+- [Known limitations](#known-limitations)
 - [Development](#development)
 - [License](#license)
 
@@ -56,7 +57,8 @@ Zigbee bulbs. Bulbs with the original firmware cannot sense motion.
   the paths that see motion. A path through a wall that lights up while you move in the living room does not switch
   the hall on.
 - **A floor plan.** Draw rooms, doors and walls, or import them from a [Valetudo](https://valetudo.cloud) vacuum map,
-  then drag your bulbs onto it.
+  then drag your bulbs onto it. Rooms can be resized, reshaped corner by corner, merged and nested (a pantry inside a
+  kitchen), and unsaved edits survive a reload or a Home Assistant restart.
 - **A learning wizard for your phone.** Walk through your rooms as it asks. The model learns how your bulbs see
   movement in your home; nothing changes until you apply what it learnt, and you can roll back.
 - **Quality and history.** See how well each room is covered, which paths are noisy, what to change, and replay what
@@ -71,7 +73,7 @@ Zigbee bulbs. Bulbs with the original firmware cannot sense motion.
   ([`z2m/outglow.mjs`](https://github.com/outglow/outglow/tree/main/z2m)). ZHA is not supported.
 - **Bulbs running Outglow with motion sensing switched on** (`motion_sensing` in Zigbee2MQTT): at least two that hear
   each other, and more for several rooms. Radio paths through walls do much of the work, so one bulb per room is
-  usually not enough on its own.
+  usually not enough on its own. A plan holds at most 40 rooms and 100 bulbs (see [Plan limits](#plan-limits)).
 - **Recommended: activity reports**, the Zigbee2MQTT device option `motion_activity_rate` above 0 (e.g. 2 per
   second). Without them the integration only sees whether each bulb detected motion, not on which paths. They need an
   Outglow firmware and converter that support them.
@@ -119,9 +121,12 @@ the room the front door opens into, and **Save**. See [Plan editor](#plan-editor
 
 **Import from a Valetudo vacuum.** If a robot vacuum running Valetudo has mapped your home, choose **Import → Fetch
 from the vacuum** (robots seen over MQTT are listed; otherwise type its address), or choose a map file exported from
-Valetudo. Its segments become rooms with shared walls and doors, and the floor is kept as a background. With *Keep
-the bulbs placed on the current plan* the bulbs you already placed move with the matching rooms. The import is only a
-preview until you click **Use this plan** and **Save**. An exported Outglow plan imports the same way.
+Valetudo. Its segments become rooms with shared walls and doors, and the floor is kept as a background under the
+rooms, in the editor and on **Live**. With *Keep the bulbs placed on the current plan* the bulbs you already placed
+move with the rooms of the same name; that takes at least three such rooms (with one or two the bulbs stay where they
+were, and the preview says how many rooms were missing). The import is only a preview until you click **Use this
+plan** and **Save**. An exported Outglow plan imports the same way. A Valetudo map may be up to 16 MiB of text, an
+Outglow plan up to 512 KiB, and the result must fit the [plan limits](#plan-limits).
 
 <p align="center">
   <img src="docs/images/import-valetudo-desktop-dark.png" width="760" alt="The Import dialog: a Valetudo map was recognised, four rooms and three doors, a few warnings, and a preview of the imported rooms with the vacuum's floor as the background.">
@@ -184,14 +189,34 @@ bulb names. *Now* counts the pairs that see motion and says whether interference
 
 ### Plan editor
 
-Tools: **Select**, **Rectangle**, **Polygon**, **Door**, **Bulb**, undo and redo, grid and snapping, **Import** and
-**Export**. A selected room has handles: the square ones resize it (Shift keeps the proportions, Alt resizes from the
-centre), the round ones move a corner; drag a wall to move it, and a wall shared with another room moves in both
-(Alt detaches it); drag the inside to move the room with its bulbs. Double-click a wall to add a corner; Cmd/Ctrl turns
-snapping off; arrow keys move, Alt+arrows resize. The side panel edits the selected room (name, Home Assistant area,
-colour, front door, exact edge lengths), wall (kind: partition, brick, concrete, glass) or bulb (height; a bulb can be
-pinned to a room it does not stand in). The list of problems under it says what is still missing, such as a room
-without bulbs or a bulb outside every room.
+Tools: **Select**, **Rectangle**, **Polygon**, **Door**, **Bulb**, undo and redo, grid and snapping, **Background**,
+**Import** and **Export**. The side panel edits the selected room (name, Home Assistant area, colour, front door,
+exact edge lengths), wall (kind: partition, brick, concrete, glass, no wall), door (door or opening, width, position)
+or bulb (height; a bulb can be pinned to a room it does not stand in). The list of checks under it says what is still
+missing, such as a room without bulbs, a bulb outside every room or rooms that overlap.
+
+- **Stretching.** A selected room has square handles that resize it (Shift keeps the proportions, Alt resizes from the
+  centre; on a phone the proportions button in the toolbar). Drag a wall to move it: a wall shared with another room
+  moves in both (Alt moves only this room's), and doors on it keep their width. Drag the inside to move the room with
+  its bulbs (Shift: in a straight line). Cmd/Ctrl turns snapping off; arrow keys move, Alt+arrows resize, and arrows
+  stop where a wall cannot go.
+- **Corners.** Drag a corner to reshape the room; double-click a wall to add a corner there. Click a corner and press
+  Delete or Backspace, or double-click it, to remove it (on a phone: *Remove corner* in the panel). A corner that has
+  to stay says why: a room needs three corners, and removing a corner must not make the room cross itself or run over
+  another room. `,` and `.` pick the previous and next corner, `[` and `]` the previous and next wall.
+- **Merging.** Select the wall between two rooms and choose *Merge into one room*: the line goes and one room is left.
+  Before you save, the panel says what is lost with the removed room (its settings, its entities in Home Assistant and
+  what Outglow learnt for it) and what happens to its area. Rooms that overlap, or one inside the other, cannot be
+  merged, and the panel says why. *Delete* on a wall turns it into *No wall* and keeps the two rooms.
+- **Nested rooms.** A room drawn wholly inside another (a pantry, a kitchen island) is nested, not an overlap: its
+  walls with the outer room run along its own inner sides, you can put doors on them, and a bulb inside it belongs to
+  the smaller room. Only rooms that share part of their floor are flagged as overlapping.
+- **Drafts.** Unsaved edits are kept in this browser, per browser tab, for 7 days; a background from an import is
+  kept with them. When the panel is rebuilt (Home Assistant restarts, or the tab was hidden for a while) or the page
+  is reloaded, the editor offers to restore or discard them and says when the plan on the server has changed since.
+  After a reconnect the panel fetches the plan again: without unsaved edits it is replaced, with them they stay, and
+  when someone else saved meanwhile you choose *Load theirs* or *Keep mine* (which lists the rooms it would remove or
+  give new ids).
 
 <p align="center">
   <img src="docs/images/plan-editor-desktop-light.png" width="760" alt="The Plan tab: the living room is selected and shows its handles and edge lengths; the side panel shows its name, area, colour and edges.">
@@ -234,6 +259,13 @@ history, the model's snapshots (roll back, delete, reset learning), and the moti
 sensitivity, probes, calibration). A write to a bulb is never automatic: a dialog shows exactly what it overwrites
 (a new sensitivity, for example, overwrites every line of that bulb and clears its calibration) and the change goes
 through only with a fresh confirmation.
+
+**A bulb with its own CFAR detector.** Outglow firmware 1.0.6 and newer can switch a bulb's motion detector to CFAR
+(`motion_detector` in Zigbee2MQTT). Such a bulb's activity levels and noise mean something else, so the integration
+skips them: the directions that bulb receives give no data, and neither the host's CFAR nor the model learns from
+them. Its motion bits and the signal of its lines are still used, and the directions other bulbs receive from it work
+as before. Its card in Settings says *Detector in the bulb: CFAR — line data skipped*, and calibrating such a bulb
+takes about 15 minutes instead of one. Bulbs without the field (older firmware) are treated as the rule detector.
 
 <p align="center">
   <img src="docs/images/settings-desktop-dark.png" width="760" alt="The Settings tab in the dark theme with the hall's room settings.">
@@ -293,7 +325,7 @@ Room entities use the room id from the plan in place of `<room>`.
 |---|---|---|---|---|---|---|
 | `binary_sensor.outglow_home_motion` | Motion at home | home | motion | — | — | Motion in any room; turns off 10 s after the last motion. |
 | `sensor.outglow_motion_room` | Motion room | home | enum | `none` | `rooms`, `trail`, `likely_person` | The room with the freshest, most certain motion, or `none`. |
-| `sensor.outglow_status` | Status | home | enum, diagnostic | `learning`, `ready`, `degraded`, `paused` | `bulbs_offline`, `last_calibration`, `model_version`, `pending`, `bulbs_active`, `bulbs_quiet`, `empty_house_hours` | Whether the model is still learning, ready, degraded (bulbs missing) or paused. |
+| `sensor.outglow_status` | Status | home | enum, diagnostic | `learning`, `ready`, `degraded`, `paused`, `plan_too_large` | `bulbs_offline`, `last_calibration`, `model_version`, `pending`, `bulbs_active`, `bulbs_quiet`, `empty_house_hours` | Learning, ready, degraded (bulbs missing), paused, or stopped by a plan over the limits. |
 | `switch.outglow_learning` | Learning | home | config | — | — | Background learning; proposals still wait for Apply in the panel. |
 | `switch.outglow_sensing` | Sensing | home | config | — | — | Pauses the whole pipeline; room entities become unavailable. |
 | `button.outglow_delete_motion_history` | Delete motion history | home | config | — | — | Deletes the stored motion history (SQLite) at once. |
@@ -388,6 +420,17 @@ Zigbee2MQTT (device → Settings (specific)). Without reports the integration on
 Rooms without bulbs are seen only by paths crossing them, and rules mode never switches them on. Put a bulb in the room
 or between its neighbours, and look at **Quality** for suggestions.
 
+**A repair says the plan is too large.** The stored plan is over the [plan limits](#plan-limits) (for example one
+saved by an earlier version). Outglow keeps it but does not sense with it: the home entities are unavailable, the
+status is `plan_too_large`, and learning and the night calibration wait. Open **Plan**, use fewer rooms, corners or
+bulbs, or add the doors between detailed rooms, and save.
+
+**A repair says the stored plan could not be read.** Outglow runs without rooms and leaves every room entity and
+device as it is; the unreadable plan is kept as a copy in `.storage` (the repair names the file). Fix that file, or
+put a copy from a backup in its place, and choose **Restore**. Or choose **Discard the old plan**, or simply draw and
+save a new plan: the old rooms that are not in it are then removed with their entities, and their ids are never given
+to new rooms.
+
 **Too many false alarms.** Lower the room's false alarm budget, let the night calibration run (it needs empty-home
 time: the wizard's empty step, or people entities with everyone away), skip the noisy directions that **Quality**
 lists, and report false alarms with `outglow.feedback` or in **History**.
@@ -423,6 +466,70 @@ afterwards).
   automations.
 - Motion sensing in the Outglow firmware is experimental, and this integration has been tested in one home so far.
 
+### Plan limits
+
+So that the engine can be rebuilt in time, a plan (drawn or imported) has at most **40 rooms, 2000 room corners,
+2000 walls and doors and 100 bulbs**, and the estimated cost of rebuilding the engine with the learnt model must stay
+within 2 s of CPU (the rebuild runs off Home Assistant's event loop). With few rooms all 100 bulbs fit (up to 8 rooms
+of four corners each); with more rooms fewer do: 89 bulbs at 12 rooms, 55 at 20, 23 at 40. A save over the limits is
+refused with the limit it exceeds; a stored plan over them stops sensing until it is simplified (see the repair
+above).
+
+## Known limitations
+
+Minor issues that are known and not fixed yet.
+
+*Plan editor*
+
+- The `,` `.` `[` `]` shortcuts are also matched by the physical key, so on German, French, Dvorak or Russian layouts
+  the key in that place picks corners and walls too (for example `ü`, `$`, `;`, `:`), as do Shift+`,`, Option+`,` and
+  a key pressed during IME composition.
+- With nothing selected, the editor's hint is visible to screen readers and also announced in the status region, so
+  it may be read twice.
+- Merging two rooms whose Home Assistant areas were both deleted keeps the kept room's missing area, and the note
+  shows it as a raw id.
+- A strip that crosses the notch of a U-shaped room is reported as lying inside it, though it only crosses the notch;
+  the merge is rightly refused either way.
+- Undoing the addition of a selected corner moves the selection to the neighbouring corner with the same number
+  instead of clearing it.
+- After a browser crash or a restored session (a page closed without `pagehide`), the restored tab is taken for a
+  duplicate for up to 3 minutes and gets a new tab id; the previous page's drafts are offered only by an editor opened
+  after that.
+
+*Plan, import and limits*
+
+- An import with *Keep the bulbs* checks the limits before it adds the kept bulbs, so the preview can show more than
+  100 bulbs without a warning; the save is then refused.
+- The message for a plan over the CPU budget does not suggest simpler outlines or merging rooms, and suggests adding
+  doors even when the rooms' adjacency is already given. The Polish repair shows the limit in English.
+- When re-sending the background fails during a save, the editor stays at the old revision of the plan, and its next
+  save ends in the conflict dialog.
+- *Keep mine* with a large background is not handled well yet.
+- With a plan over the limits the engine still loads the whole learnt model of that plan (a cost at start and in
+  memory, not per tick).
+- A plan listing the same bulb twice places it in one room only (the last entry wins).
+
+*Engine and learning*
+
+- With *Others may be home*, absence is learnt softly (CFAR background only, not the pairs' background), yet the
+  wizard summary counts the empty home as known after the hours it asks for; `bayes` estimates its false alarms from
+  the pairs' background, so that is optimistic.
+- Turning *Use people* off during an absence, or restarting Home Assistant during one, loses the open empty-home
+  interval: the night calibration does not get its raw data (what was already learnt stays).
+- Making the tick longer (0.5 → 1 s) during an absence leaves about 120 s of ticks unlearnt.
+- Background lessons (empty or quiet home) held while an apply derives the model go to the next proposal, not the one
+  being applied (on purpose); that proposal's creation time is then the held lesson's, from before the apply. The
+  list of held lessons has no bound if a derivation hangs.
+- The quiet-home background (`quiet_background`) does not mark the ticks it taught, so a later empty-home label may
+  teach them again.
+- Ticks already taught keep that mark after a reset, a rollback or a discarded proposal, so they are not taught to
+  the new model again.
+- A tick topped up to full weight (0.3 + 0.7) is not counted in the label statistics of a later full-weight label.
+
+*Panel*
+
+- *Show on map* for a recommendation without spots hides the other candidate markers on the Quality map for 4 s.
+
 ## Development
 
 ```sh
@@ -430,9 +537,15 @@ python3.14 -m venv .venv
 .venv/bin/pip install -e '.[test,lint,ha]'
 npm --prefix frontend ci
 make hooks          # pre-commit: README, contracts, lint, no comments, no private data
+make quick          # only what the changes since main reach
 make check          # contracts, README, lint, types, tests, frontend build
 npm --prefix frontend run dev   # the panel on made-up data: http://localhost:5173
 ```
+
+`make quick` runs only what the changes since the fork from `main` reach: ruff on the changed files, mypy, the
+pytest files that import a changed module, vitest `--changed` and the Playwright specs whose view imports a
+changed file (`BASE=<ref>` to compare with another point, `E2E=0` to skip the browser). `make check` runs
+everything, with the 100 % engine coverage gate; run it once before a merge or a release.
 
 The README sections marked as generated come from the code (`tools/docs.py`; `make docs` rewrites them, `--check`
 fails when they are stale). The pictures come from the demo panel through Playwright (`make docs-images`, in the

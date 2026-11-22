@@ -1,5 +1,6 @@
 import { css, html, nothing } from "lit";
 import type { DirectionFrame, DirectionQuality, PairFrame, QualityReport, Room, RoomFrame } from "../api/types";
+import { Backdrop } from "../background";
 import { fmtAgo, fmtClock, fmtNumber, fmtPercent } from "../format";
 import { strings } from "../i18n";
 import {
@@ -43,6 +44,7 @@ export const tl = strings(
     layer_trail: "Trail",
     layer_heat: "Heat",
     layer_names: "Bulb names",
+    layer_background: "Background",
     pair_title: "{a} ↔ {b}",
     obs_2: "Both directions see motion",
     obs_1: "One direction sees motion",
@@ -106,6 +108,7 @@ export const tl = strings(
     layer_trail: "Ślad",
     layer_heat: "Ciepło",
     layer_names: "Nazwy żarówek",
+    layer_background: "Tło",
     pair_title: "{a} ↔ {b}",
     obs_2: "Ruch widzą oba kierunki",
     obs_1: "Ruch widzi jeden kierunek",
@@ -194,6 +197,7 @@ export class OutglowLiveView extends ViewBase {
   declare _quality: QualityReport | null;
 
   private _qualityLoading = false;
+  private _backdrop = new Backdrop(this);
 
   constructor() {
     super();
@@ -492,6 +496,8 @@ export class OutglowLiveView extends ViewBase {
     if (this.subpath && !this._room && this.plan?.rooms.some((r) => r.id === this.subpath)) {
       this._room = this.subpath;
     }
+    const file = this._layers.background === false ? null : (this.plan?.background?.file ?? null);
+    this._backdrop.show(file ? { hass: this.hass, file } : null);
   }
 
   private _setLayer(key: keyof Layers, on: boolean): void {
@@ -610,6 +616,7 @@ export class OutglowLiveView extends ViewBase {
       ["heat", tl(loc, "layer_heat")],
       ["trail", tl(loc, "layer_trail")],
       ["bulbNames", tl(loc, "layer_names")],
+      ...(this.plan?.background ? ([["background", tl(loc, "layer_background")]] as [keyof Layers, string][]) : []),
     ];
     return html`<div class="layers-pop" role="group" aria-label=${tl(loc, "layers")} @keydown=${(e: KeyboardEvent) => {
       if (e.key === "Escape") this._layersOpen = false;
@@ -618,7 +625,7 @@ export class OutglowLiveView extends ViewBase {
         ([key, label]) => html`<label>
           <span>${label}</span>
           <span class="switch"
-            ><input type="checkbox" .checked=${this._layers[key]} @change=${(e: Event) => this._setLayer(key, (e.target as HTMLInputElement).checked)} /><span></span
+            ><input type="checkbox" .checked=${this._layers[key] !== false} @change=${(e: Event) => this._setLayer(key, (e.target as HTMLInputElement).checked)} /><span></span
           ></span>
         </label>`,
       )}
@@ -662,6 +669,7 @@ export class OutglowLiveView extends ViewBase {
             .names=${this.names()}
             .loc=${loc}
             .layers=${this._layers}
+            .background=${this._backdrop.url}
             .selected=${this._pair ? pairKey(this._pair.a, this._pair.b) : null}
             .dark=${this.dark}
             interactive

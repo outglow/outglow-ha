@@ -881,7 +881,7 @@ export class OutglowQualityView extends ViewBase {
     const markers = this._highlight ?? this._candidates(report);
     return html`<div class="map-wrap">
         <outglow-plan-view
-          class=${this._highlight ? "flash" : ""}
+          class=${this._highlight?.length ? "flash" : ""}
           .plan=${this.plan}
           .frame=${frame}
           .names=${this.names()}
@@ -1029,7 +1029,7 @@ export class OutglowQualityView extends ViewBase {
         return;
       case "show_candidates":
         this._mode = "map";
-        this._highlight = rec.candidates.length ? rec.candidates : this._candidates(report);
+        this._highlight = rec.candidates;
         void this.updateComplete.then(() => {
           this.renderRoot.querySelector("#directions")?.scrollIntoView({ behavior: "smooth", block: "start" });
           setTimeout(() => (this._highlight = null), 4000);

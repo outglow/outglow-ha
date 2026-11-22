@@ -158,6 +158,7 @@ test("summary in rules mode offers bayes and switches with one tap", async ({ pa
   await expect(page.getByRole("heading", { name: EN.summary })).toBeVisible();
   await expect(page.getByText("Rules mode does not learn")).toBeVisible();
   await expect(page.getByText("Rules mode does not use the learned model")).toBeVisible();
+  await expect(page.getByText(/or choose the people at home in Settings/)).toBeVisible();
   const map = page.locator("outglow-learn-view .room-map outglow-plan-view");
   await expect(map).toBeVisible();
   await expect(map.locator("text.room-state").first()).toBeVisible();

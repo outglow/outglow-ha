@@ -11,7 +11,7 @@ from .const import MOTION_ROOM_DWELL_S, STATUS_VOLATILE_S, TRAIL_LEN
 from .coordinator import OutglowCoordinator
 from .entity import OutglowEntity, OutglowRoomEntity, setup_rooms
 
-STATUSES = ["learning", "ready", "degraded", "paused"]
+STATUSES = ["learning", "ready", "degraded", "paused", "plan_too_large"]
 NONE = "none"
 
 
@@ -29,13 +29,13 @@ async def async_setup_entry(
     )
 
 
-def motion_room(coordinator: OutglowCoordinator) -> str:
+def motion_room(coordinator: OutglowCoordinator, shown: str = NONE) -> str:
     frame = coordinator.frame
     if frame is None:
         return NONE
-    moving = [(rf.p, room) for room, rf in frame.rooms.items() if rf.motion]
+    moving = [(rf.p, room == shown, rf.since or 0.0, room) for room, rf in frame.rooms.items() if rf.motion]
     if moving:
-        return max(moving)[1]
+        return max(moving)[3]
     held = [(rf.since or 0.0, rf.p, room) for room, rf in frame.rooms.items() if rf.occupied]
     return max(held)[2] if held else NONE
 
@@ -54,7 +54,7 @@ class MotionRoom(OutglowEntity, SensorEntity):
     def _settle(self) -> str:
         c = self.coordinator
         frame = c.frame
-        best = motion_room(c)
+        best = motion_room(c, self._shown)
         if frame is not None:
             self._moved.update((room, frame.t) for room, rf in frame.rooms.items() if rf.motion)
         if frame is None or best == self._shown:
@@ -80,7 +80,7 @@ class MotionRoom(OutglowEntity, SensorEntity):
         trail = tuple((room, t) for room, t in frame.trail[-TRAIL_LEN:]) if frame else ()
         g = c.settings.global_
         person = next(iter(c.house.persons_home)) if g.use_persons and len(c.house.persons_home) == 1 else None
-        available = g.sensing and frame is not None
+        available = g.sensing and frame is not None and c.plan_problem is None
         if not self._due((available, state, person, tuple(options)), (trail, tuple(sorted(rooms.items())))):
             return False
         attrs: dict[str, Any] = {"rooms": rooms, "trail": [list(item) for item in trail]}
@@ -106,7 +106,9 @@ class Status(OutglowEntity, SensorEntity):
     def _refresh(self) -> bool:
         c = self.coordinator
         frame = c.frame
-        status = frame.status if frame is not None else ("learning" if c.settings.global_.sensing else "paused")
+        status: str = frame.status if frame is not None else ("learning" if c.settings.global_.sensing else "paused")
+        if c.plan_problem is not None and status != "paused":
+            status = "plan_too_large"
         gates = frame.gates if frame is not None else {}
         summary = c.model_summary()
         steady = {

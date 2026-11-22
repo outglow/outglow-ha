@@ -1,4 +1,5 @@
 import base64
+import cmath
 import json
 import math
 import time
@@ -10,8 +11,9 @@ from typing import Any
 import pytest
 
 from custom_components.outglow import plan_import, valetudo, valetudo_fetch
-from custom_components.outglow.engine import from_json, to_json
-from custom_components.outglow.engine.types import ExcludedDirection, Plan, PlanBulb, Room
+from custom_components.outglow.engine import Engine, from_json, to_json
+from custom_components.outglow.engine.defaults import HIST_BINS
+from custom_components.outglow.engine.types import ExcludedDirection, Plan, PlanBulb, Room, Settings, Wall
 from custom_components.outglow.errors import OutglowError
 from tests.integration.common import plan_json
 from tools import valetudo_synth
@@ -193,7 +195,7 @@ def test_a_map_without_segments_gives_a_backdrop_and_a_warning() -> None:
     assert result.plan.rooms == ()
     assert result.background is not None
     assert result.plan.background is not None
-    assert result.plan.background.file == "plan.svg"
+    assert result.plan.background.file == plan_import.background_file(result.background, "svg")
     assert [w["code"] for w in result.warnings] == ["no_segments"]
 
 
@@ -243,6 +245,22 @@ def test_the_synthetic_flat_is_current_and_parses() -> None:
     assert base64.b64decode(fixture["background_image"]["data_base64"]) == result.background
 
 
+def test_two_maps_placed_alike_get_backgrounds_named_by_their_pictures() -> None:
+    first = valetudo_synth.flat()
+    second = json.loads(json.dumps(first))
+    floor = next(layer for layer in second["layers"] if layer["type"] == "floor")
+    pairs = zip(floor["pixels"][0::2], floor["pixels"][1::2], strict=True)
+    floor["pixels"] = [v for x, y in pairs if not (236 <= x <= 238 and 130 <= y <= 132) for v in (x, y)]
+    a = plan_import.load("auto", json.dumps(first), {})
+    b = plan_import.load("auto", json.dumps(second), {})
+    assert a.plan.background is not None
+    assert b.plan.background is not None
+    assert replace(a.plan.background, file="") == replace(b.plan.background, file="")
+    assert a.background != b.background
+    assert a.plan.background.file != b.plan.background.file
+    assert a.plan.background.file == plan_import.background_file(a.background or b"", "svg")
+
+
 def test_auto_recognises_every_format() -> None:
     plan = plan_json()
     cases = {
@@ -267,10 +285,247 @@ def test_auto_recognises_every_format() -> None:
         assert err.value.code == "invalid_format"
 
 
+def _overlaps(rooms: dict[str, Any]) -> list[dict[str, Any]]:
+    text = json.dumps({"rooms": {name: {"outline": outline} for name, outline in rooms.items()}})
+    return [w["params"] for w in plan_import.load("auto", text, {}).warnings if w["code"] == "overlapping_rooms"]
+
+
+def test_only_rooms_that_share_part_of_their_floor_are_told_to_overlap() -> None:
+    ell = [[0, 0], [4, 0], [4, 1], [1, 1], [1, 4], [0, 4]]
+    big = [[0, 0], [5, 0], [5, 5], [0, 5]]
+    assert _overlaps({"ell": ell, "nook": [[1, 1], [4, 1], [4, 4], [1, 4]]}) == []
+    assert _overlaps({"a": [[0, 0], [2, 0], [2, 2], [0, 2]], "b": [[1, 1], [3, 1], [3, 3], [1, 3]]}) == [
+        {"a": "a", "b": "b"}
+    ]
+    assert _overlaps({"big": big, "small": [[1, 1], [2, 1], [2, 2], [1, 2]]}) == []
+    assert _overlaps({"big": big, "alcove": [[0, 0], [2, 0], [2, 5], [0, 5]]}) == []
+
+
 def test_too_much_text_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(plan_import, "MAX_TEXT", 10)
     with pytest.raises(OutglowError, match="too large"):
         plan_import.load("auto", "x" * 11, {})
+
+
+def test_only_a_valetudo_map_may_be_larger_than_a_plan() -> None:
+    most = plan_import.MAX_PLAN_TEXT
+    yaml_text = "rooms:\n" + "- []\n" * (most // 5)
+    plan_text = json.dumps({"rooms": [], "padding": " " * most})
+    for fmt, text in (
+        ("auto", yaml_text),
+        ("mieszkanie_yaml", yaml_text),
+        ("auto", plan_text),
+        ("outglow_json", plan_text),
+        ("auto", json.dumps([[]] * most)),
+    ):
+        started = time.thread_time()
+        with pytest.raises(OutglowError, match="too large"):
+            plan_import.load(fmt, text, {})
+        assert time.thread_time() - started < 1.0
+    lists = "[" + "[]," * (plan_import.MAX_TEXT // 3 - 1) + "[]]"
+    tracemalloc.start()
+    with pytest.raises(OutglowError, match="too large"):
+        plan_import.load("auto", lists, {})
+    peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    assert peak < 1024 * 1024
+    padded = FLAT.read_text().strip()[:-1] + ',"padding":"' + " " * most + '"}'
+    assert plan_import.load("auto", padded, {}).source == "valetudo_map"
+    assert plan_import.load("valetudo_json", padded, {}).source == "valetudo_map"
+
+
+def many(rooms: int, corners: int = 3, bulbs: int = 0, overlap: bool = False) -> dict[str, Any]:
+    def outline(i: int) -> list[list[float]]:
+        x = 0.02 * i if overlap else float(i % 20) * 3
+        y = 0.0 if overlap else float(i // 20) * 3
+        return [
+            [x + 1 + math.cos(2 * math.pi * k / corners), y + 1 + math.sin(2 * math.pi * k / corners)]
+            for k in range(corners)
+        ]
+
+    return {
+        "rooms": [{"id": f"r{i}", "name": f"R{i}", "outline": outline(i)} for i in range(rooms)],
+        "bulbs": [{"ieee": f"0x{i + 1:016x}", "x": 1.0, "y": 1.0} for i in range(bulbs)],
+    }
+
+
+def test_too_many_rooms_corners_or_bulbs_are_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    for data, what in (
+        (many(plan_import.MAX_ROOMS + 1), "rooms"),
+        (many(1, bulbs=plan_import.MAX_BULBS + 1), "bulbs"),
+        (many(2, corners=plan_import.MAX_VERTICES // 2 + 1), "room corners"),
+    ):
+        with pytest.raises(OutglowError, match=f"too many {what}: [0-9]+, at most [0-9]+$"):
+            plan_import.build("outglow_plan", data, {})
+    assert len(plan_import.build("outglow_plan", many(plan_import.MAX_ROOMS), {}).plan.rooms) == plan_import.MAX_ROOMS
+    current = from_json(Plan, {**plan_json(), "bulbs": many(1, bulbs=plan_import.KEPT_BULBS + 1)["bulbs"]})
+    with pytest.raises(OutglowError, match="The current plan has too many bulbs"):
+        plan_import.load("auto", FLAT.read_text(), {}, current)
+    monkeypatch.setattr(plan_import, "MAX_WALLS", 1)
+    walls = {**many(1), "walls": [{"a": [0, 0], "b": [1, 0]}] * 2}
+    with pytest.raises(OutglowError, match="too many walls"):
+        plan_import.build("outglow_plan", walls, {})
+
+
+def grid(rooms: int, corners: int, bulbs: int, adjacent: bool = True, outside: bool = False) -> Plan:
+    side = math.ceil(math.sqrt(rooms))
+
+    def outline(i: int) -> tuple[tuple[float, float], ...]:
+        x0, y0 = (i % side) * 4.0, (i // side) * 4.0
+        per = corners // 4
+        edge = [(x0 + 3.9 * k / per, y0) for k in range(per)] + [(x0 + 3.9, y0 + 3.9 * k / per) for k in range(per)]
+        back = [(x0 + 3.9 - 3.9 * k / per, y0 + 3.9) for k in range(per)] + [
+            (x0, y0 + 3.9 - 3.9 * k / per) for k in range(per)
+        ]
+        return tuple(edge + back)
+
+    def spot(i: int) -> tuple[float, float]:
+        if outside:
+            return -50.0 - i % 10, -50.0 - i * 0.37
+        room = i % rooms
+        return (room % side) * 4.0 + 1 + (i // rooms) * 0.01, (room // side) * 4.0 + 2
+
+    return Plan(
+        rooms=tuple(Room(id=f"r{i}", name=f"R{i}", outline=outline(i)) for i in range(rooms)),
+        bulbs=tuple(PlanBulb(ieee=f"0x{i + 1:016x}", x=spot(i)[0], y=spot(i)[1]) for i in range(bulbs)),
+        adjacent=tuple((f"r{i}", f"r{i + 1}") for i in range(rooms - 1)) if adjacent else (),
+    )
+
+
+def most_bulbs(rooms: int, corners: int, adjacent: bool = True, outside: bool = False) -> int:
+    bulbs = 0
+    while plan_import.excess(grid(rooms, corners, bulbs + 1, adjacent, outside)) is None:
+        bulbs += 1
+    return bulbs
+
+
+def test_the_largest_plans_let_in_build_an_engine_in_bounded_time() -> None:
+    for rooms, corners, adjacent, outside in (
+        (40, 48, True, False),
+        (20, 4, True, False),
+        (5, 4, True, False),
+        (4, 500, True, True),
+        (10, 120, False, False),
+        (1, 2000, False, True),
+    ):
+        bulbs = most_bulbs(rooms, corners, adjacent, outside)
+        assert 2 <= bulbs <= plan_import.MAX_BULBS
+        plan = grid(rooms, corners, bulbs, adjacent, outside)
+        assert plan_import.engine_cost(plan).total_us <= plan_import.ENGINE_BUDGET_US
+        started = time.thread_time()
+        Engine(plan, Settings())
+        assert time.thread_time() - started < 1.5 * plan_import.ENGINE_BUDGET_US / 1e6, (rooms, corners, bulbs)
+
+
+def learned(plan: Plan) -> dict[str, Any]:
+    topology = Engine(plan, Settings()).topology
+    directions = [f"{rx}>{tx}" for rx, tx in topology.directions]
+    active: dict[str, Any] = {
+        "hist": {d: {"bins": [1.0] * HIST_BINS, "censored": 0.5} for d in directions},
+        "bg_onsets": dict.fromkeys(directions, 0.5),
+        "bg_ticks": 10000.0,
+        "pair_bg": {f"{a}|{b}": [10.0, 1.0, 0.5] for a, b in topology.pairs},
+        "emit": {f"{a}|{b}|{r}": [3.0, 2.0, 1.0] for a, b in topology.pairs for r in topology.rooms},
+    }
+    return {"active": active}
+
+
+def rebuild_s(plan: Plan) -> float:
+    old = Engine(plan, Settings(), learned(plan))
+    started = time.thread_time()
+    Engine(plan, Settings(), old.model_state()).inherit(old).tick(1000.0)
+    return time.thread_time() - started
+
+
+def partitions(plan: Plan, count: int) -> Plan:
+    return replace(
+        plan, walls=tuple(Wall(a=(-30.0 - k * 0.01, -30.0), b=(-30.0 - k * 0.01, -29.0)) for k in range(count))
+    )
+
+
+def test_the_estimate_covers_a_learned_model_and_every_wall() -> None:
+    plan = grid(5, 4, most_bulbs(5, 4))
+    walled = partitions(plan, plan_import.MAX_WALLS)
+    pairs = len(plan.bulbs) * (len(plan.bulbs) - 1) / 2
+    grown = plan_import.engine_cost(walled).total_us - plan_import.engine_cost(plan).total_us
+    assert grown == pytest.approx(pairs * plan_import.MAX_WALLS * plan_import.PAIR_WALL_US)
+    bulbs = 2
+    while plan_import.excess(partitions(grid(1, 4, bulbs + 1), plan_import.MAX_WALLS)) is None:
+        bulbs += 1
+    for shown in (plan, grid(12, 4, most_bulbs(12, 4)), partitions(grid(1, 4, bulbs), plan_import.MAX_WALLS)):
+        estimate = plan_import.engine_cost(shown).total_us / 1e6
+        assert rebuild_s(shown) < 1.5 * estimate, (len(shown.rooms), len(shown.bulbs))
+
+
+def test_a_plan_too_large_to_sense_names_the_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    bulbs = most_bulbs(20, 4)
+    with pytest.raises(
+        OutglowError,
+        match=f"The plan is too large to sense in time: {bulbs + 1} bulbs with 20 rooms and 80 room corners,"
+        f" at most {bulbs} bulbs with these rooms$",
+    ):
+        plan_import.limit(grid(20, 4, bulbs + 1))
+    assert plan_import.excess(grid(20, 4, bulbs)) is None
+    assert 40 <= bulbs <= 70
+    assert most_bulbs(5, 4) == most_bulbs(8, 4) == plan_import.MAX_BULBS
+    assert 60 < most_bulbs(12, 4) < plan_import.MAX_BULBS
+    assert 15 < most_bulbs(40, 4) < 30
+    detailed = grid(10, 200, 0, adjacent=False)
+    assert plan_import.engine_cost(detailed).fixed_us < plan_import.ENGINE_BUDGET_US
+    assert plan_import.excess(detailed) is None
+    monkeypatch.setattr(plan_import, "ENGINE_BUDGET_US", plan_import.engine_cost(detailed).fixed_us / 2)
+    assert plan_import.excess(replace(detailed, adjacent=(("r0", "r1"),))) is None
+    assert plan_import.excess(detailed) == (
+        "The plan is too detailed to sense in time: 2000 room corners in rooms with no doors between them;"
+        " add the doors or simplify the rooms"
+    )
+
+
+def test_a_current_plan_from_before_the_limits_still_keeps_its_bulbs() -> None:
+    current = grid(plan_import.MAX_ROOMS + 5, 4, 3)
+    assert plan_import.excess(current) is not None
+    result = plan_import.load("auto", FLAT.read_text(), {}, current)
+    assert result.kept is not None
+    assert {b.ieee for b in result.plan.bulbs} == {b.ieee for b in current.bulbs}
+
+
+def test_checking_a_large_plan_stays_quick(monkeypatch: pytest.MonkeyPatch) -> None:
+    corners = plan_import.MAX_VERTICES // plan_import.MAX_ROOMS
+    plan = from_json(Plan, many(plan_import.MAX_ROOMS, corners, plan_import.MAX_BULBS))
+    warnings = plan_import._Warnings()
+    started = time.thread_time()
+    plan_import.check(plan, {}, warnings)
+    assert time.thread_time() - started < 1.0
+    assert not [w for w in warnings.items if w["code"] == "overlapping_rooms"]
+    stacked = many(30, overlap=True)
+    result = plan_import.build("outglow_plan", stacked, {})
+    assert len([w for w in result.warnings if w["code"] == "overlapping_rooms"]) == 30 * 29 // 2
+    monkeypatch.setattr(plan_import, "CHECK_BUDGET_S", -1.0)
+    with pytest.raises(OutglowError, match="too complex"):
+        plan_import.build("outglow_plan", stacked, {})
+
+
+def test_bulb_positions_go_through_the_room_boxes_and_the_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    plan = grid(9, 8, 30)
+    plan = replace(plan, bulbs=(*plan.bulbs, PlanBulb(ieee="0x00000000000000ff", x=100.0, y=100.0, room="r1")))
+    found = plan_import.positions(plan, plan_import._Rooms(plan.rooms, plan_import._Clock()))
+    assert found == {b.ieee: plan_import.room_of((b.x, b.y), plan.rooms) for b in plan.bulbs}
+    assert found["0x00000000000000ff"] is None
+    with pytest.raises(OutglowError, match="too complex"):
+        plan_import.positions(plan, plan_import._Rooms(plan.rooms, plan_import._Clock(-1.0)))
+
+
+def test_rooms_found_through_their_boxes_match_a_plain_search() -> None:
+    rooms = (
+        Room(id="big", name="Big", outline=((0, 0), (10, 0), (10, 10), (0, 10))),
+        Room(id="l", name="L", outline=((12, 0), (16, 0), (16, 2), (14, 2), (14, 6), (12, 6))),
+        Room(id="flat", name="Flat", outline=((20, 0), (21, 0))),
+    )
+    index = plan_import._Rooms(rooms, plan_import._Clock())
+    for x in range(-1, 23):
+        for y in range(-1, 12):
+            point = (x + 0.5, y + 0.5)
+            assert index.at(point) == plan_import.room_of(point, rooms)
 
 
 def turned(plan: Plan, mirror: bool) -> Plan:
@@ -422,14 +677,50 @@ def test_one_matching_room_does_not_move_the_bulbs() -> None:
     assert {"code": "bulbs_not_aligned", "params": {"rooms": 1}} in result.warnings
 
 
-def test_two_matching_rooms_fit_a_turn() -> None:
-    old = centred((2, 2), (8, 2))
-    result = _keep(Plan(rooms=centred((10, 10), (10, 16))), Plan(rooms=old, bulbs=BULB))
+def test_two_matching_rooms_do_not_move_the_bulbs() -> None:
+    old = centred((2, 2), (8, 2), (20, 20), prefix="r")
+    new = (*centred((10, 10), (10, 16), prefix="r"), *centred((30, 2), prefix="x"))
+    current = Plan(rooms=old, bulbs=BULB, north_deg=10.0, view_rotation_deg=30.0)
+    result = _keep(Plan(rooms=new), current)
     assert result.kept is not None
-    assert result.kept["aligned"] is True
-    assert result.kept["rotation_deg"] == pytest.approx(90.0)
-    assert result.kept["mirrored"] is False
-    assert (result.plan.bulbs[0].x, result.plan.bulbs[0].y) == pytest.approx((10.0, 10.0))
+    assert (result.kept["aligned"], result.kept["rooms"], result.kept["rms_m"]) == (False, 2, None)
+    assert (result.plan.bulbs[0].x, result.plan.bulbs[0].y) == (BULB[0].x, BULB[0].y)
+    assert (result.plan.north_deg, result.plan.view_rotation_deg) == (10.0, 30.0)
+    assert {"code": "bulbs_not_aligned", "params": {"rooms": 2}} in result.warnings
+    three = _keep(Plan(rooms=centred((10, 10), (10, 16), (-8, 28))), current)
+    assert three.kept is not None
+    assert three.kept["aligned"] is True
+    assert three.kept["rotation_deg"] == pytest.approx(90.0)
+    assert (three.plan.bulbs[0].x, three.plan.bulbs[0].y) == pytest.approx((10.0, 10.0))
+
+
+def compass(v: complex) -> float:
+    return math.degrees(math.atan2(v.real, -v.imag)) % 360.0
+
+
+def heading(deg: float) -> complex:
+    return complex(math.sin(math.radians(deg)), -math.cos(math.radians(deg)))
+
+
+@pytest.mark.parametrize("turn", [0.0, 60.0, -135.0])
+@pytest.mark.parametrize("mirror", [False, True])
+def test_north_follows_the_turn_and_the_mirror_of_the_rooms(turn: float, mirror: bool) -> None:
+    spin = cmath.exp(1j * math.radians(turn))
+    old = centred((0, 0), (9, 0), (0, 7), (9, 8))
+
+    def move(p: tuple[float, float]) -> tuple[float, float]:
+        z = spin * (complex(*p).conjugate() if mirror else complex(*p)) + complex(40, -3)
+        return (z.real, z.imag)
+
+    new = tuple(replace(r, outline=tuple(move(p) for p in r.outline)) for r in old)
+    result = _keep(Plan(rooms=new), Plan(rooms=old, bulbs=BULB, north_deg=30.0, view_rotation_deg=15.0))
+    assert result.kept is not None
+    assert result.kept["mirrored"] is mirror
+    north = heading(30.0)
+    expected = compass(spin * (north.conjugate() if mirror else north))
+    assert abs((result.plan.north_deg - expected + 180.0) % 360.0 - 180.0) < 0.11
+    view = 15.0 if mirror else 15.0 - turn
+    assert abs((result.plan.view_rotation_deg - view + 180.0) % 360.0 - 180.0) < 0.11
 
 
 def test_three_rooms_in_a_row_are_never_mirrored() -> None:
@@ -474,7 +765,7 @@ BULB = (PlanBulb(ieee="0x0000000000000001", x=2.0, y=2.0),)
 
 def test_centre_of_a_degenerate_outline_is_its_mean() -> None:
     assert plan_import._centre(((0, 0), (2, 0), (4, 0))) == complex(2, 0)
-    assert plan_import._fit([(complex(1, 1), complex(3, 1)), (complex(1, 1), complex(3, 1))]) == (
+    assert plan_import._fit([(complex(1, 1), complex(3, 1))] * 3) == (
         complex(1),
         complex(2, 0),
         False,

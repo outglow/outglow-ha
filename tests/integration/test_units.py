@@ -14,7 +14,6 @@ from custom_components.outglow.engine.types import (
     Context,
     GlobalSettings,
     Header,
-    Json,
     Label,
     LightEvent,
     Observation,
@@ -92,9 +91,12 @@ def test_import_rejects_garbage_and_flags_overlaps() -> None:
         plan_import.parse("mieszkanie_yaml", "- just a list", {})
     with pytest.raises(OutglowError):
         plan_import.parse("other", "", {})
-    text = "rooms:\n  a:\n    outline: [[0,0],[4,0],[4,4],[0,4]]\n  b:\n    outline: [[1,1],[3,1],[3,3],[1,3]]\n"
+    text = "rooms:\n  a:\n    outline: [[0,0],[4,0],[4,4],[0,4]]\n  b:\n    outline: [[3,1],[6,1],[6,3],[3,3]]\n"
     _plan, warnings = plan_import.parse("mieszkanie_yaml", text, {})
     assert {"code": "overlapping_rooms", "params": {"a": "a", "b": "b"}} in warnings
+    nested = "rooms:\n  a:\n    outline: [[0,0],[4,0],[4,4],[0,4]]\n  b:\n    outline: [[1,1],[3,1],[3,3],[1,3]]\n"
+    _plan, warnings = plan_import.parse("mieszkanie_yaml", nested, {})
+    assert "overlapping_rooms" not in [w["code"] for w in warnings]
 
 
 def test_import_puts_a_bulb_in_nested_rooms_in_the_smallest() -> None:
@@ -240,14 +242,28 @@ def test_a_tie_between_rooms_recognises_no_room_whatever_their_order() -> None:
     assert predicted({}, []) == 0
 
 
-def test_summary_counts_the_empty_house_the_model_will_have_seen() -> None:
+def test_summary_reports_the_empty_house_it_is_given() -> None:
     plan, settings, raw, session, labels = _wizard_like("rules")
     assert summarise(plan, settings, None, raw, session, labels)["empty_house_hours"] == 0.0
-    empty = Label(t0=0.0, t1=1806.0, kind="empty", source="wizard")
-    still = Label(t0=0.0, t1=900.0, kind="empty", room="living", source="wizard")
-    model: dict[str, Json] = {"active": {"empty_s": 1800.0}}
-    result = summarise(plan, settings, model, raw, session, [*labels, empty, still])
-    assert result["empty_house_hours"] == 1.0
+    assert summarise(plan, settings, None, raw, session, labels, 5400.0)["empty_house_hours"] == 1.5
+
+
+def test_summary_says_what_lets_the_empty_house_learn_by_itself() -> None:
+    plan, settings, raw, session, labels = _wizard_like("rules")
+
+    def setup(**changes: Any) -> str:
+        g = replace(settings.global_, **changes)
+        return str(summarise(plan, replace(settings, global_=g), None, raw, session, labels)["empty_setup"])
+
+    assert setup() == "persons"
+    assert setup(use_persons=True) == "persons"
+    assert setup(persons=("person.a",)) == "persons"
+    assert setup(use_persons=True, persons=("person.a",)) == "none"
+    assert setup(use_persons=True, persons=("person.a",), learning=False) == "learning"
+    assert setup(learning=False) == "both"
+    needed = summarise(plan, settings, None, raw, session, labels)["empty_needed_h"]
+    soft = replace(settings, global_=replace(settings.global_, others_may_be_home=True))
+    assert (needed, summarise(plan, soft, None, raw, session, labels)["empty_needed_h"]) == (2.0, 6.7)
 
 
 def test_recommendation_repairs_name_the_room_and_mention_rules_only_for_rules() -> None:
@@ -263,6 +279,9 @@ def test_recommendation_repairs_name_the_room_and_mention_rules_only_for_rules()
         now=lambda: 0.0,
         devices=devices,
         panel_conflict=False,
+        plan_copy=None,
+        plan_problem=None,
+        sessions=SimpleNamespace(rate_restore={}, rates_overdue=False),
         started=0.0,
         plan=plan,
         frame=None,

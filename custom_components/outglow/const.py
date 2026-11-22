@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Final
 
 DOMAIN: Final = "outglow"
-VERSION: Final = "0.0.1"
+VERSION: Final = "0.1.0"
 
 CONF_BASE_TOPIC: Final = "base_topic"
 CONF_LOG_LEVEL: Final = "log_level"
@@ -26,6 +26,7 @@ EXPORTS_DIR: Final = "exports"
 
 OUTGLOW_MODELS: Final = ("outglow-", "open-eglo-")
 WEAK_SIGNAL_DBM: Final = -88
+DERIVE_TRIES: Final = 3
 
 BRIDGE_WAIT_S: Final = 5.0
 STATE_WAIT_S: Final = 3.0
@@ -35,6 +36,9 @@ RATE_DEFAULT: Final = 0
 RATE_RETRY_S: Final = 30.0
 RATE_RETRY_MAX_S: Final = 1800.0
 ISSUE_RATES_LEFT: Final = "rates_not_restored"
+ISSUE_RATES_WAITING: Final = "rates_waiting"
+ISSUE_SESSION_RATES: Final = "session_rates_waiting"
+SESSION_RATES_REPAIR_S: Final = 600.0
 STEP_MAX_S: Final = {"empty": 1800.0, "room": 600.0, "transition": 300.0}
 SESSION_IDLE_S: Final = 1800.0
 SUMMARY_LEAD_S: Final = 60.0
@@ -64,8 +68,6 @@ LABEL_WEIGHTS: Final = {
     "service": 0.8,
     "feedback": 0.7,
     "manual_light": 0.3,
-    "empty_house": 1.0,
-    "empty_house_soft": 0.3,
 }
 MANUAL_LIGHT_BEFORE_S: Final = 20.0
 MANUAL_LIGHT_AFTER_S: Final = 5.0

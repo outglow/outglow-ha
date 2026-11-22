@@ -1,7 +1,13 @@
 PY ?= .venv/bin/python
 ENGINE_PATHS = custom_components/outglow/engine tools tests/engine tests/contract.py tests/test_contracts.py tests/test_repo.py tests/test_docs.py tests/conftest.py
 
-.PHONY: check test-engine test-ha lint types contracts docs docs-check frontend frontend-test e2e docs-images docs-images-check hooks pre-commit
+BASE ?= main
+E2E ?= 1
+
+.PHONY: quick check test-engine test-ha lint types contracts docs docs-check frontend frontend-test e2e docs-images docs-images-check hooks pre-commit
+
+quick:
+	$(PY) tools/quick.py --base $(BASE) --py $(PY) $(if $(filter 0,$(E2E)),--no-e2e)
 
 check: contracts docs-check lint types test-engine test-ha frontend-test frontend
 

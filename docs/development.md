@@ -11,6 +11,7 @@ python3.14 -m venv .venv
 npm --prefix frontend ci
 make hooks            # git pre-commit hook in .githooks/
 
+make quick            # only what the changes since main reach (BASE=<ref>, E2E=0 without Playwright)
 make check            # everything below plus the frontend build
 make test-engine      # tests/engine + contracts + repository rules + README, without Home Assistant, 100 % engine coverage
 make test-ha          # tests/integration (pytest-homeassistant-custom-component)
@@ -20,6 +21,10 @@ make frontend         # build into custom_components/outglow/frontend/
 make e2e              # Playwright on the demo panel
 npm --prefix frontend run dev   # the panel on made-up data: http://localhost:5173
 ```
+
+`make quick` (`tools/quick.py`) runs ruff on the changed files, mypy, the pytest files that import a changed module
+(directly or through other modules), vitest `--changed` and the Playwright specs whose view imports a changed file.
+It is for the edit loop; run `make check`, with the 100 % engine coverage gate, before a merge or a release.
 
 The engine tests run in plain Python 3.14 with `pytest`, `pytest-cov` and `jsonschema` (`pip install -e '.[test]'`);
 `tests/integration` is skipped then.
@@ -121,6 +126,9 @@ One change (commit or pull request) contains at once:
   integration as `from .engine import …`; do not mix them in one test. `custom_components/outglow` is never put on
   `sys.path`: the platform `select.py` would shadow the standard library's `select`.
 - **ruff** would format code blocks in Markdown; `*.md` is excluded in `pyproject.toml`.
+- **Loop time**: `tests/integration/test_loop_time.py` measures the CPU time of the event loop thread per call
+  (architecture 3.10). On a slow or busy machine `OUTGLOW_LOOP_TIME_SCALE=2` doubles its budgets; the defaults are
+  the budget for users' hardware.
 - **Node**: versions are pinned exactly; `npm ci` from the lockfile. The Playwright tests use Chrome by default
   (`PW_CHANNEL=chromium` in the Docker image) and WebKit for the focus tests; `PW_PORT` changes the demo server's port.
 

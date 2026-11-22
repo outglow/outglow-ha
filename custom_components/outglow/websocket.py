@@ -1,8 +1,8 @@
+import asyncio
 import base64
 import binascii
-import hashlib
-import re
-import zlib
+import os
+import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from pathlib import Path
@@ -25,13 +25,12 @@ from .store import migrate_plan
 
 Handler = Callable[[HomeAssistant, OutglowCoordinator, dict[str, Any]], Awaitable[Any]]
 NUMBER = probatio.Any(int, float)
-IEEE = re.compile(r"^0x[0-9a-f]{16}$")
 MIMES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/svg+xml": "svg"}
 BACKGROUND_MAX = 10 * 1024 * 1024
-BACKGROUND_FILE = re.compile(r"plan(-[0-9a-f]{16})?\.(png|jpg|webp|svg)")
 TICKS = (0.25, 0.5, 1.0)
 BUDGETS = (0.1, 0.3, 1.0, 3.0, 10.0)
 MIN_STEP_S = 1.0
+BACKGROUND_LOCK = f"{DOMAIN}_background_lock"
 
 
 def coordinator_of(hass: HomeAssistant) -> OutglowCoordinator | None:
@@ -66,24 +65,8 @@ def _command(name: str, fields: dict[Any, Any] | None = None) -> Callable[[Handl
 
 
 def check_plan(plan: Plan) -> list[dict[str, Any]]:
-    ids = [room.id for room in plan.rooms]
-    if len(set(ids)) != len(ids) or any(not room_id for room_id in ids):
-        raise OutglowError("invalid_format", "Room ids must be unique and not empty")
-    if set(ids) & set(plan.retired_rooms):
-        raise OutglowError("invalid_format", "A room id is listed as retired")
-    for bulb in plan.bulbs:
-        if not IEEE.match(bulb.ieee):
-            raise OutglowError("invalid_format", f"Bad IEEE address {bulb.ieee}")
-        if bulb.room is not None and bulb.room not in ids:
-            raise OutglowError("invalid_format", f"Unknown room {bulb.room}")
-    if len({bulb.ieee for bulb in plan.bulbs}) != len(plan.bulbs):
-        raise OutglowError("invalid_format", "A bulb is placed twice")
-    if any(not 0 <= door.wall < len(plan.walls) for door in plan.doors):
-        raise OutglowError("invalid_format", "A door points at a missing wall")
-    if any(a not in ids or b not in ids for a, b in plan.adjacent):
-        raise OutglowError("invalid_format", "Adjacent rooms must exist")
-    if plan.background is not None and not BACKGROUND_FILE.fullmatch(plan.background.file):
-        raise OutglowError("invalid_format", "Background file must be plan.<ext> or plan-<hash>.<ext>")
+    plan_import.check_plan(plan)
+    plan_import.limit(plan)
     return plan_import.pinned_elsewhere(plan)
 
 
@@ -113,21 +96,34 @@ def background_dir(hass: HomeAssistant) -> Path:
     return Path(hass.config.path(DATA_DIR))
 
 
+def background_lock(hass: HomeAssistant) -> asyncio.Lock:
+    lock: asyncio.Lock = hass.data.setdefault(BACKGROUND_LOCK, asyncio.Lock())
+    return lock
+
+
 def _write_background(folder: Path, ext: str, data: bytes) -> tuple[str, bool]:
     folder.mkdir(parents=True, exist_ok=True)
-    name = f"plan-{hashlib.sha256(data).hexdigest()[:16]}.{ext}"
+    name = plan_import.background_file(data, ext)
     path = folder / name
     if path.is_file():
         return name, False
-    partial = folder / f".{name}.part"
-    partial.write_bytes(data)
-    partial.replace(path)
+    handle, partial = tempfile.mkstemp(dir=folder, prefix=".plan-", suffix=".part")
+    try:
+        with os.fdopen(handle, "wb") as out:
+            out.write(data)
+        os.replace(partial, path)
+    except BaseException:
+        Path(partial).unlink(missing_ok=True)
+        raise
     return name, True
 
 
 def _remove_backgrounds(folder: Path, keep: set[str]) -> None:
     for path in folder.glob("plan*.*") if folder.is_dir() else []:
-        if BACKGROUND_FILE.fullmatch(path.name) and path.name not in keep:
+        if plan_import.BACKGROUND_FILE.fullmatch(path.name) and path.name not in keep:
+            path.unlink(missing_ok=True)
+    for path in folder.glob(".plan-*.part") if folder.is_dir() else []:
+        if path.is_file():
             path.unlink(missing_ok=True)
 
 
@@ -145,24 +141,23 @@ def _decode_image(image: dict[str, Any]) -> bytes:
     except (binascii.Error, ValueError) as err:
         raise OutglowError("invalid_format", "Not base64") from err
     if image.get("deflated"):
-        stream = zlib.decompressobj()
-        try:
-            data = stream.decompress(data, BACKGROUND_MAX + 1)
-        except zlib.error as err:
-            raise OutglowError("invalid_format", "The image is not deflated") from err
+        data = plan_import.inflate(data, BACKGROUND_MAX, "The image")
     if not data or len(data) > BACKGROUND_MAX:
         raise OutglowError("invalid_format", "Image is empty or too large")
     return data
 
 
-def _read_background(folder: Path, name: str | None) -> dict[str, str] | None:
+def _read_background(folder: Path, name: str | None) -> dict[str, Any]:
     candidates = [folder / name] if name else sorted(folder.glob("plan.*"))
     for path in candidates:
         ext = path.suffix.removeprefix(".")
         mime = next((m for m, e in MIMES.items() if e == ext), None)
         if mime is not None and path.is_file():
-            return {"mime": mime, "data_base64": base64.b64encode(path.read_bytes()).decode()}
-    return None
+            return {
+                "image": {"mime": mime, "data_base64": base64.b64encode(path.read_bytes()).decode()},
+                "file": path.name,
+            }
+    return {"image": None, "file": None}
 
 
 @callback
@@ -207,6 +202,7 @@ async def ws_info(hass: HomeAssistant, c: OutglowCoordinator, msg: dict[str, Any
     status = frame.status if frame is not None else ("learning" if c.settings.global_.sensing else "paused")
     return {
         "version": VERSION,
+        "entry_id": c.entry.entry_id,
         "status": status,
         "base_topic": c.base_topic,
         "units": "metric" if hass.config.units is METRIC_SYSTEM else "imperial",
@@ -225,7 +221,7 @@ async def ws_bulbs(hass: HomeAssistant, c: OutglowCoordinator, msg: dict[str, An
 
 @_command("outglow/plan/get")
 async def ws_plan_get(hass: HomeAssistant, c: OutglowCoordinator, msg: dict[str, Any]) -> Any:
-    return {"rev": c.plan.rev, "plan": to_json(c.plan)}
+    return {"rev": c.plan.rev, "plan": to_json(c.plan), "reserved_rooms": sorted(await c.async_known_rooms())}
 
 
 UPLOAD = {
@@ -245,34 +241,39 @@ UPLOAD = {
 )
 async def ws_plan_save(hass: HomeAssistant, c: OutglowCoordinator, msg: dict[str, Any]) -> Any:
     plan = from_json(Plan, migrate_plan(msg["plan"]))
-    warnings = check_plan(plan)
+    warnings = await hass.async_add_executor_job(check_plan, plan)
     folder = background_dir(hass)
-    previous = c.plan.background.file if c.plan.background is not None else None
     image = msg.get("background_image")
-    written = None
+    upload = None
     if image is not None:
         if plan.background is None:
             raise OutglowError("invalid_format", "A background image needs plan.background")
-        data = _decode_image(image)
-        name, fresh = await hass.async_add_executor_job(_write_background, folder, MIMES[image["mime"]], data)
-        written = name if fresh else None
-        plan = replace(plan, background=replace(plan.background, file=name))
-    elif plan.background is not None and not await hass.async_add_executor_job(
-        _background_exists, folder, plan.background.file
-    ):
-        plan = replace(plan, background=None)
-    try:
-        rev = await c.async_save_plan(msg["rev"], plan)
-    except BaseException:
-        if written is not None:
-            await hass.async_add_executor_job(_unlink, folder / written)
-        raise
-    keep = {name for name in (previous, plan.background.file if plan.background else None) if name}
-    await hass.async_add_executor_job(_remove_backgrounds, folder, keep)
+        upload = MIMES[image["mime"]], await hass.async_add_executor_job(_decode_image, image)
+    async with background_lock(hass):
+        previous = c.plan.background.file if c.plan.background is not None else None
+        written = None
+        if upload is not None and plan.background is not None:
+            name, fresh = await hass.async_add_executor_job(_write_background, folder, *upload)
+            written = name if fresh else None
+            plan = replace(plan, background=replace(plan.background, file=name))
+        elif plan.background is not None and not await hass.async_add_executor_job(
+            _background_exists, folder, plan.background.file
+        ):
+            plan = replace(plan, background=None)
+        try:
+            saved = await c.async_save_plan(msg["rev"], plan)
+        except BaseException:
+            shown = c.plan.background.file if c.plan.background is not None else None
+            if written is not None and written != shown:
+                await hass.async_add_executor_job(_unlink, folder / written)
+            raise
+        keep = {name for name in (previous, plan.background.file if plan.background else None) if name}
+        await hass.async_add_executor_job(_remove_backgrounds, folder, keep)
     return {
-        "rev": rev,
+        "rev": saved.rev,
         "warnings": warnings,
         "background": to_json(plan.background) if plan.background is not None else None,
+        "retired_rooms": list(saved.retired_rooms),
     }
 
 
@@ -314,14 +315,14 @@ async def ws_plan_import(hass: HomeAssistant, c: OutglowCoordinator, msg: dict[s
     text: str | None = msg.get("text")
     deflated: str | None = msg.get("deflated_base64")
 
-    def run() -> plan_import.Imported:
+    def run() -> dict[str, Any]:
         if text is not None and deflated is None:
-            return plan_import.load(msg["format"], text, known, current)
+            return _imported(plan_import.load(msg["format"], text, known, current))
         if deflated is not None and text is None:
-            return plan_import.load(msg["format"], plan_import.inflate_text(deflated), known, current)
+            return _imported(plan_import.load(msg["format"], plan_import.inflate_text(deflated), known, current))
         raise OutglowError("invalid_format", "Give either text or deflated_base64")
 
-    return _imported(await hass.async_add_executor_job(run))
+    return await hass.async_add_executor_job(run)
 
 
 @_command("outglow/plan/valetudo/robots")
@@ -347,16 +348,16 @@ async def ws_valetudo_fetch(hass: HomeAssistant, c: OutglowCoordinator, msg: dic
     else:
         raise OutglowError("invalid_format", "Give a robot or its address")
     known = {d.ieee: d.name for d in c.devices.bulbs()}
-    imported = await hass.async_add_executor_job(valetudo_fetch.load, payload, known, current)
+    result = await hass.async_add_executor_job(lambda: _imported(valetudo_fetch.load(payload, known, current)))
     if url:
         await c.store.async_save_valetudo_url(url)
-    return _imported(imported)
+    return result
 
 
 @_command("outglow/plan/background/get")
 async def ws_background_get(hass: HomeAssistant, c: OutglowCoordinator, msg: dict[str, Any]) -> Any:
     name = c.plan.background.file if c.plan.background is not None else None
-    return {"image": await hass.async_add_executor_job(_read_background, background_dir(hass), name)}
+    return await hass.async_add_executor_job(_read_background, background_dir(hass), name)
 
 
 @_command(
@@ -364,8 +365,9 @@ async def ws_background_get(hass: HomeAssistant, c: OutglowCoordinator, msg: dic
     {probatio.Required("mime"): probatio.In(list(MIMES)), probatio.Required("data_base64"): str},
 )
 async def ws_background_set(hass: HomeAssistant, c: OutglowCoordinator, msg: dict[str, Any]) -> Any:
-    data = _decode_image(msg)
-    name, _ = await hass.async_add_executor_job(_write_background, background_dir(hass), MIMES[msg["mime"]], data)
+    data = await hass.async_add_executor_job(_decode_image, msg)
+    async with background_lock(hass):
+        name, _ = await hass.async_add_executor_job(_write_background, background_dir(hass), MIMES[msg["mime"]], data)
     return {"file": name}
 
 
@@ -426,7 +428,8 @@ async def ws_history_frames(hass: HomeAssistant, c: OutglowCoordinator, msg: dic
     step = c.settings.global_.tick_s
     first = int(-(-start // step))
     times = [i * step for i in range(first, int(end // step) + 1)]
-    frames = await hass.async_add_executor_job(replay_json, c.plan, c.settings, c.active_model(), records, times)
+    model = await c.async_active_model()
+    frames = await hass.async_add_executor_job(replay_json, c.engine_plan(), c.engine_settings(), model, records, times)
     return {"frames": frames, "truncated": truncated}
 
 

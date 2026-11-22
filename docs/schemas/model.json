@@ -48,7 +48,8 @@
         "snapshot_id": {"type": "string"},
         "t": {"$ref": "common.json#/$defs/Timestamp"},
         "reason": {"enum": ["daily", "before_session", "before_apply", "before_reset", "before_rollback"]},
-        "model_version": {"type": "integer", "minimum": 0}
+        "model_version": {"type": "integer", "minimum": 0},
+        "mode": {"$ref": "settings.json#/$defs/Mode", "description": "Detection mode before the change, when the change switched it (apply with mode, or a rollback that restored a mode); rolling back to this snapshot restores it"}
       }
     },
     "SnapshotList": {

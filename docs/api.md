@@ -132,6 +132,7 @@ Websocket commands (architecture.md 3.7). request: the message fields besides id
 | `model` | `string` | yes |  |
 | `available` | `boolean` | yes |  |
 | `sensing` | `boolean` | yes |  |
+| `detector` | `"rule" \| "cfar"` | yes | The bulb's own detector; with cfar its line data is skipped |
 | `probes` | `number \| null` | yes | Probes per second |
 | `activity_rate` | `number \| null` | yes | Activity reports per second while the gate is open |
 | `sensitivity` | `number \| null` | yes |  |
@@ -362,7 +363,7 @@ Event of outglow/live/subscribe: a full frame first, then deltas
 
 `history.json#/$defs/EventKind`
 
-`"motion_on" | "motion_off" | "false_alarm" | "missed" | "correct" | "label" | "veto" | "bulb_write" | "model_apply" | "model_discard" | "model_rollback" | "session_start" | "session_stop" | "house_empty" | "house_occupied"`
+`"motion_on" | "motion_off" | "false_alarm" | "missed" | "correct" | "label" | "veto" | "bulb_write" | "model_apply" | "model_discard" | "model_rollback" | "model_reset" | "snapshot_delete" | "session_start" | "session_stop" | "house_empty" | "house_occupied"`
 
 ### HistoryEvent
 
@@ -465,6 +466,7 @@ Same as the outglow.feedback service: a correction from the history view
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `version` | `string` | yes | Integration version |
+| `entry_id` | `string` | yes | Config entry of the integration; what the panel keeps in the browser belongs to it |
 | `status` | `Status` | yes |  |
 | `base_topic` | `string` | yes |  |
 | `units` | `"metric" \| "imperial"` | yes | Length units of the Home Assistant configuration; the plan is always in metres |
@@ -520,6 +522,7 @@ The active model and a proposal waiting for apply (D4); no raw data
 | `t` | `Timestamp` | yes |  |
 | `reason` | `"daily" \| "before_session" \| "before_apply" \| "before_reset" \| "before_rollback"` | yes |  |
 | `model_version` | `number` | yes |  |
+| `mode` | `Mode` | no | Detection mode before the change, when the change switched it (apply with mode, or a rollback that restored a mode); rolling back to this snapshot restores it |
 
 ### SnapshotList
 
@@ -595,7 +598,7 @@ Floor plan (architecture.md 4.1). One floor, metres.
 | `version` | `1` | yes |  |
 | `rev` | `number` | yes | Revision, raised by every save |
 | `floor_id` | `string \| null` | yes |  |
-| `north_deg` | `number` | yes |  |
+| `north_deg` | `number` | yes | Direction of north on the plan, degrees clockwise from up (-y) |
 | `view_rotation_deg` | `number` | yes |  |
 | `background` | `Background \| null` | yes |  |
 | `rooms` | `Room[]` | yes |  |
@@ -630,7 +633,7 @@ Floor plan (architecture.md 4.1). One floor, metres.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `file` | `string` | yes | File name under /config/outglow, served only over the websocket; plan-<hash>.<ext> for images stored by outglow/plan/save |
+| `file` | `string` | yes | File name under /config/outglow, served only over the websocket; plan-<hash>.<ext>, the hash of the picture, for images stored by outglow/plan/save and for the background of an imported map |
 | `x` | `number` | yes |  |
 | `y` | `number` | yes |  |
 | `m_per_px` | `number` | yes |  |
@@ -700,6 +703,7 @@ Floor plan (architecture.md 4.1). One floor, metres.
 |---|---|---|---|
 | `rev` | `number` | yes |  |
 | `plan` | `Plan` | yes |  |
+| `reserved_rooms` | `RoomId[]` | yes | While the stored plan is unreadable: ids of the old rooms Home Assistant still knows; a new room never takes one, an imported room keeps it |
 
 ### PlanSaveRequest
 
@@ -720,6 +724,7 @@ Floor plan (architecture.md 4.1). One floor, metres.
 | `rev` | `number` | yes |  |
 | `warnings` | `PlanWarning[]` | yes | Saved anyway; for now only bulb_pinned_elsewhere |
 | `background` | `Background \| null` | yes | plan.background as stored: the new file name, or null when the plan pointed at a file that is gone |
+| `retired_rooms` | `RoomId[]` | yes | Every retired room id after this save, including the rooms this save removed |
 
 ### BackgroundUpload
 
@@ -757,7 +762,7 @@ Exactly one of text and deflated_base64
 |---|---|---|---|
 | `format` | `PlanImportFormat` | yes |  |
 | `text` | `string` | no |  |
-| `deflated_base64` | `string` | no | The text deflated (zlib) and in base64, for files that would not fit the 4 MiB message limit; at most 16 MiB inflated |
+| `deflated_base64` | `string` | no | The text deflated (zlib) and in base64, for files that would not fit the 4 MiB message limit; a whole zlib stream with nothing after it, at most 16 MiB inflated, and only a Valetudo map may be over 512 KiB |
 | `current` | `Plan \| null` | no | The plan in the editor, to keep its bulbs; ignored for an Outglow plan, which is taken as it is. From the current plan come its bulbs (unless the file places them), excluded directions, floor, north and view rotation, and the id of each room matched by id or name; a Valetudo map, which holds no more than outlines and names, also takes the matched rooms' names, colours, areas and entrance flags |
 
 ### PlanWarning
@@ -779,8 +784,8 @@ Bulbs carried over from the current plan and how they were moved onto the import
 |---|---|---|---|
 | `bulbs` | `number` | yes |  |
 | `rooms` | `number` | yes | Rooms matched by id or name; from two on their centres fit a rigid move (both plans are in metres) |
-| `aligned` | `boolean` | yes | False below two matched rooms: the bulbs keep their coordinates (warning bulbs_not_aligned) |
-| `rotation_deg` | `number` | yes | Turn of the imported rooms against the current ones; view_rotation_deg is turned back by it and north_deg with it |
+| `aligned` | `boolean` | yes | False below three matched rooms: the bulbs keep their coordinates (warning bulbs_not_aligned) |
+| `rotation_deg` | `number` | yes | Turn of the imported rooms against the current ones; view_rotation_deg is turned back by it and north_deg with it; when mirrored, north_deg becomes 180 + rotation_deg - north_deg and view_rotation_deg stays |
 | `mirrored` | `boolean` | yes | Only from three rooms not in a line and when the mirrored fit is at least twice as close |
 | `rms_m` | `number \| null` | yes | Mismatch of the room centres after the move; null below two rooms |
 
@@ -841,6 +846,7 @@ Bulbs carried over from the current plan and how they were moved onto the import
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `image` | `BackgroundImage \| null` | yes |  |
+| `file` | `string \| null` | yes | The stored file the image was read from, so a client caching by plan.background.file can tell a newer one |
 
 ### BackgroundSetResponse
 
@@ -913,7 +919,9 @@ Quality over the last days (architecture.md 5.9). Texts are built by the fronten
 
 `quality.json#/$defs/RecommendationKind`
 
-`"skip_direction" | "raise_sensitivity" | "weak_coverage" | "more_empty_house" | "frozen_direction" | "no_bulbs"`
+one_bulb (rules mode, info): the room has a single bulb next to a room with pairs of its own; while someone moves there, it lights only when all of at least 3 lines from its bulb into that room move, and candidates mark where a second bulb would give it pairs of its own: spots at least 0.5 m from its walls (less in a room narrower than 1 m), 1 m apart, where the new pair with its bulb runs longest through the room (numbers.own_m, weighted 10 to 1), its lines to other bulbs breaking ties by their mean length in the room (numbers.lines_m: all the new lines in the room)
+
+`"skip_direction" | "raise_sensitivity" | "weak_coverage" | "more_empty_house" | "frozen_direction" | "no_bulbs" | "one_bulb"`
 
 ### RecommendationAction
 
@@ -1030,6 +1038,7 @@ One line of a JSONL recording, format 2 (architecture.md 4.4). The first line is
 | `persons_home` | `string[]` | yes |  |
 | `house_empty` | `"yes" \| "soft" \| "no" \| "unknown"` | yes |  |
 | `offline` | `Ieee[]` | yes |  |
+| `cfar` | `Ieee[]` | no | Bulbs whose own detector is CFAR; their line data is skipped |
 
 ### Label
 
@@ -1121,7 +1130,9 @@ Learning wizard session (architecture.md 6.3). Labels enter the model only after
 | `bayes` | `SessionScore \| null` | no | The same session scored in bayes mode when the active mode is rules |
 | `suggest_mode` | `Mode \| null` | no | Mode worth switching to: bayes after learning beats the active rules by at least 10 points |
 | `rooms_without_bulbs` | `RoomId[]` | no | Rooms seen only by lines crossing them; never lit in rules mode |
-| `empty_house_hours` | `number` | no | Empty house the model will have learned from after applying: the active model plus this session's empty step. Below 2 h false alarms in an empty house are unknown |
+| `empty_house_hours` | `number` | no | Empty house the model will have learned from after applying: the model apply builds on (the pending proposal, with empty house learned in the background, else the active model) after the queued labels, this session's empty step among them, are learned from the tick buffer; a tick already learned counts once, at its highest weight. Below 2 h false alarms in an empty house are unknown |
+| `empty_setup` | `"none" \| "persons" \| "learning" \| "both"` | no | What the settings still need before an empty house teaches the model by itself: none; persons (use people at home with at least one person); learning (online learning is off); both |
+| `empty_needed_h` | `number` | no | Hours of absence the empty house has to last to teach the 2 h by itself: 2 h, or 2 h / 0.3 when others may be home and it counts at the soft weight |
 
 ### SessionScore
 

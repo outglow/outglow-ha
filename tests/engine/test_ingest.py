@@ -80,3 +80,43 @@ def test_motion_occupancy_and_unknown_bulbs() -> None:
     ing.set_offline(frozenset({B1}))
     assert not ing.motion((B1, B2))
     assert not ing.occupancy(B1)
+
+
+def test_a_direction_delivers_data_once_heard_while_both_ends_are_online() -> None:
+    ing = _ingest()
+    ing.observe(obs(1.0, B1, {B2: 3, B3: 0}, signal=None))
+    assert not ing.delivering((B1, B2))
+    ing.observe(obs(1.5, B1, {B2: 3, B3: 0}, motion=frozenset({B3}), signal=None))
+    assert ing.delivering((B1, B3))
+    assert not ing.delivering((B1, B2))
+    ing.observe(obs(2.0, B1, {B2: 3}, signal=0))
+    assert not ing.delivering((B1, B2))
+    ing.observe(obs(2.5, B1, {B2: 3}, signal=-70))
+    ing.observe(obs(3.0, B1, {B2: 3}, signal=None))
+    assert ing.delivering((B1, B2))
+    assert not ing.delivering((B2, B1))
+    ing.set_offline(frozenset({B2}))
+    assert not ing.delivering((B1, B2))
+    assert ing.delivering((B1, B3))
+    ing.set_offline(frozenset({B1}))
+    assert not ing.delivering((B1, B3))
+
+
+def test_a_bulb_with_its_own_cfar_detector_gives_no_line_samples() -> None:
+    ing = _ingest()
+    ing.observe(obs(1.0, B1, all_levels(B1, 5)))
+    ing.observe(obs(1.5, B1, all_levels(B1, 6), motion=frozenset({B2})))
+    assert ing.tick(1.5, ing.gates(1.5))[(B1, B2)].level == 6
+    ing.set_cfar(frozenset({B1}))
+    gates = ing.gates(10.0)
+    assert gates[B1] == "closed"
+    samples = ing.tick(10.0, gates)
+    assert samples[(B1, B2)].level is None
+    assert not samples[(B1, B2)].censored
+    assert samples[(B2, B1)].censored
+    assert ing.motion((B1, B2))
+    fresh = _ingest()
+    fresh.inherit(ing)
+    assert not fresh.tick(10.0, fresh.gates(10.0))[(B1, B3)].censored
+    ing.set_cfar(frozenset())
+    assert ing.tick(10.0, ing.gates(10.0))[(B1, B2)].censored

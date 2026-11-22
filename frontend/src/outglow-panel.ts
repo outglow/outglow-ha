@@ -2,7 +2,7 @@ import { LitElement, css, html, nothing, type PropertyValues } from "lit";
 import { call, subscribe } from "./api/client";
 import { applyLive } from "./api/live";
 import type { Bulb, Frame, Info, Plan } from "./api/types";
-import type { Hass, Unsubscribe } from "./hass";
+import type { Hass, HassConnection, Unsubscribe } from "./hass";
 import { helpUrl } from "./help";
 import { locOf, type Loc } from "./i18n";
 import {
@@ -41,6 +41,9 @@ export const TABS: { id: Tab; icon: string }[] = [
 ];
 
 const LIVE_RATE_HZ = 4;
+export const RESYNC_MS = 1000;
+export const RESYNC_MAX_MS = 30_000;
+export const RESYNC_TRIES = 10;
 
 export function parseRoute(path: string | undefined): { tab: Tab; subpath: string } {
   const parts = (path ?? "").split("/").filter(Boolean);
@@ -64,6 +67,7 @@ export class OutglowPanel extends LitElement {
     _subpath: { state: true },
     _info: { state: true },
     _plan: { state: true },
+    _reserved: { state: true },
     _rev: { state: true },
     _frame: { state: true },
     _bulbs: { state: true },
@@ -79,6 +83,7 @@ export class OutglowPanel extends LitElement {
   declare _subpath: string;
   declare _info: Info | null;
   declare _plan: Plan | null;
+  declare _reserved: string[];
   declare _rev: number;
   declare _frame: Frame | null;
   declare _bulbs: Bulb[];
@@ -88,6 +93,13 @@ export class OutglowPanel extends LitElement {
   private _connected = false;
 
   private _unsubscribe: Promise<Unsubscribe> | null = null;
+  private _watched: HassConnection | null = null;
+  private _ready = (): void => {
+    this._attempt = 0;
+    void this._resync();
+  };
+  private _attempt = 0;
+  private _retry: ReturnType<typeof setTimeout> | undefined;
   private _dirty = false;
   private _toastTimer: ReturnType<typeof setTimeout> | undefined;
   private _visibility = (): void => {
@@ -105,6 +117,7 @@ export class OutglowPanel extends LitElement {
     this._subpath = "";
     this._info = null;
     this._plan = null;
+    this._reserved = [];
     this._rev = 0;
     this._frame = null;
     this._bulbs = [];
@@ -333,13 +346,54 @@ export class OutglowPanel extends LitElement {
     if (this.hass) {
       void this._start();
     }
+    if (this._connected) this._watch();
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     document.removeEventListener("visibilitychange", this._visibility);
     window.removeEventListener("beforeunload", this._beforeUnload);
+    this._unwatch();
+    clearTimeout(this._retry);
+    this._retry = undefined;
     void this._stopLive();
+  }
+
+  private _watch(): void {
+    const connection = this.hass?.connection ?? null;
+    if (connection === this._watched) return;
+    this._unwatch();
+    connection?.addEventListener?.("ready", this._ready);
+    this._watched = connection;
+  }
+
+  private _unwatch(): void {
+    this._watched?.removeEventListener?.("ready", this._ready);
+    this._watched = null;
+  }
+
+  private async _resync(): Promise<void> {
+    clearTimeout(this._retry);
+    this._retry = undefined;
+    const hass = this.hass;
+    if (!hass || !this._connected) return;
+    try {
+      const [info, plan] = await Promise.all([call(hass, "outglow/info", {}), call(hass, "outglow/plan/get", {})]);
+      this._attempt = 0;
+      this._info = info;
+      this._plan = plan.plan;
+      this._rev = plan.rev;
+      this._error = null;
+      await this._loadBulbs();
+    } catch (err) {
+      if (this._attempt < RESYNC_TRIES && this.isConnected) {
+        this._retry = setTimeout(() => void this._resync(), Math.min(RESYNC_MAX_MS, RESYNC_MS * 2 ** this._attempt));
+        this._attempt += 1;
+      } else {
+        this._attempt = 0;
+        this._showToast({ text: errorText(this._loc, err), error: true });
+      }
+    }
   }
 
   private _beforeUnload = (event: BeforeUnloadEvent): void => {
@@ -360,6 +414,7 @@ export class OutglowPanel extends LitElement {
     if (changed.has("hass") && changed.get("hass") === undefined && this.hass) {
       void Promise.resolve().then(() => this._start());
     }
+    if (changed.has("hass") && this._connected && this.isConnected) this._watch();
   }
 
   private get _loc(): Loc {
@@ -372,11 +427,13 @@ export class OutglowPanel extends LitElement {
       return;
     }
     this._connected = true;
+    this._watch();
     this._startLive();
     try {
       const [info, plan] = await Promise.all([call(hass, "outglow/info", {}), call(hass, "outglow/plan/get", {})]);
       this._info = info;
       this._plan = plan.plan;
+      this._reserved = plan.reserved_rooms;
       this._rev = plan.rev;
       this._error = null;
       await this._loadBulbs();
@@ -562,7 +619,7 @@ export class OutglowPanel extends LitElement {
           .subpath=${common.subpath}></outglow-live-view>`;
       case "plan":
         return html`<outglow-plan-editor .hass=${common.hass} .loc=${common.loc} .plan=${common.plan} .rev=${common.rev}
-          .frame=${common.frame} .bulbs=${common.bulbs} .info=${common.info} .narrow=${common.narrow} .dark=${common.dark}
+          .reserved=${this._reserved} .frame=${common.frame} .bulbs=${common.bulbs} .info=${common.info} .narrow=${common.narrow} .dark=${common.dark}
           .subpath=${common.subpath}></outglow-plan-editor>`;
       case "learn":
         return html`<outglow-learn-view .hass=${common.hass} .loc=${common.loc} .plan=${common.plan} .rev=${common.rev}

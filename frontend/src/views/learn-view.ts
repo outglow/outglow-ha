@@ -25,7 +25,7 @@ import {
 } from "@mdi/js";
 import { css, html, nothing, svg, type PropertyValues } from "lit";
 import type { Frame, Mode, Room, Session, SessionLabelRequest, SessionSummary } from "../api/types";
-import { fmtClock, fmtDateTime, fmtDuration, fmtPercent } from "../format";
+import { fmtClock, fmtDateTime, fmtDuration, fmtNumber, fmtPercent } from "../format";
 import { bulbRoom } from "../geometry";
 import { strings } from "../i18n";
 import { icon } from "../icons";
@@ -179,8 +179,13 @@ export const tw = strings(
     cv_hint: "After learning is checked on the half of each walk the model did not learn from. It is still this same session, so the score is optimistic. Two rooms with the same answer count as no room.",
     rules_same: "Rules mode does not use the learned model, so before and after are the same. Two rooms lit at once count as no room.",
     empty_unknown: "False alarms in an empty home are unknown",
-    empty_none: "Bayes has not seen your home empty yet. The score above only says whether it finds the room you are in, not how often it switches lights on when nobody is home. Before switching, run the wizard again with the empty home step, or leave learning on while everyone is out for at least {hours} h.",
-    empty_some: "Bayes has seen your home empty for only {minutes} min. The score above only says whether it finds the room you are in, not how often it switches lights on when nobody is home. Before switching, run the wizard again with the empty home step, or leave learning on while everyone is out for at least {hours} h.",
+    empty_none: "Bayes has not seen your home empty yet. The score above only says whether it finds the room you are in, not how often it switches lights on when nobody is home.",
+    empty_some: "Bayes has seen your home empty for only {minutes} min. The score above only says whether it finds the room you are in, not how often it switches lights on when nobody is home.",
+    empty_how_none: "Before switching, run the wizard again with the empty home step, or leave learning on while everyone is out for at least {hours} h.",
+    empty_how_persons: "Before switching, run the wizard again with the empty home step, or choose the people at home in Settings: then an empty home teaches the model by itself (at least {hours} h).",
+    empty_how_learning: "Before switching, run the wizard again with the empty home step, or turn learning on in Settings: then an empty home teaches the model by itself (at least {hours} h).",
+    empty_how_both: "Before switching, run the wizard again with the empty home step, or in Settings choose the people at home and turn learning on: then an empty home teaches the model by itself (at least {hours} h).",
+    to_settings: "Settings",
     mode_rules: "Rules",
     mode_bayes: "Bayes",
     homeless: "No bulbs in: {rooms}",
@@ -325,8 +330,13 @@ export const tw = strings(
     cv_hint: "Wynik po nauce jest sprawdzany na tej połowie każdego chodzenia, z której model się nie uczył. To wciąż ta sama sesja, więc wynik jest optymistyczny. Dwa pokoje z tą samą odpowiedzią liczą się jako żaden.",
     rules_same: "Tryb reguł nie korzysta z nauczonego modelu, więc przed i po wychodzi to samo. Dwa pokoje zapalone naraz liczą się jako żaden.",
     empty_unknown: "Fałszywe alarmy w pustym domu są nieznane",
-    empty_none: "Bayes nie widział jeszcze pustego domu. Wynik wyżej mówi tylko, czy rozpozna pokój, w którym jesteś, a nie jak często zapali światło, gdy nikogo nie ma. Przed przełączeniem przejdź kreator jeszcze raz z krokiem „Pusto” albo zostaw włączoną naukę, gdy wszyscy wyjdą, na co najmniej {hours} h.",
-    empty_some: "Bayes widział pusty dom dopiero przez {minutes} min. Wynik wyżej mówi tylko, czy rozpozna pokój, w którym jesteś, a nie jak często zapali światło, gdy nikogo nie ma. Przed przełączeniem przejdź kreator jeszcze raz z krokiem „Pusto” albo zostaw włączoną naukę, gdy wszyscy wyjdą, na co najmniej {hours} h.",
+    empty_none: "Bayes nie widział jeszcze pustego domu. Wynik wyżej mówi tylko, czy rozpozna pokój, w którym jesteś, a nie jak często zapali światło, gdy nikogo nie ma.",
+    empty_some: "Bayes widział pusty dom dopiero przez {minutes} min. Wynik wyżej mówi tylko, czy rozpozna pokój, w którym jesteś, a nie jak często zapali światło, gdy nikogo nie ma.",
+    empty_how_none: "Przed przełączeniem przejdź kreator jeszcze raz z krokiem „Pusto” albo zostaw włączoną naukę, gdy wszyscy wyjdą, na co najmniej {hours} h.",
+    empty_how_persons: "Przed przełączeniem przejdź kreator jeszcze raz z krokiem „Pusto” albo ustaw domowników w Ustawieniach: wtedy nieobecność uczy się sama (potrzeba co najmniej {hours} h).",
+    empty_how_learning: "Przed przełączeniem przejdź kreator jeszcze raz z krokiem „Pusto” albo włącz naukę w Ustawieniach: wtedy nieobecność uczy się sama (potrzeba co najmniej {hours} h).",
+    empty_how_both: "Przed przełączeniem przejdź kreator jeszcze raz z krokiem „Pusto” albo w Ustawieniach ustaw domowników i włącz naukę: wtedy nieobecność uczy się sama (potrzeba co najmniej {hours} h).",
+    to_settings: "Ustawienia",
     mode_rules: "Reguły",
     mode_bayes: "Bayes",
     homeless: "Bez żarówek: {rooms}",
@@ -417,6 +427,7 @@ export class OutglowLearnView extends ViewBase {
     _consent: { state: true },
     _voice: { state: true },
     _busy: { state: true },
+    _applying: { state: true },
     _matrix: { state: true },
     _scored: { state: true },
     _mode: { state: true },
@@ -436,6 +447,7 @@ export class OutglowLearnView extends ViewBase {
   declare _consent: boolean;
   declare _voice: boolean;
   declare _busy: boolean;
+  declare _applying: "switch" | "apply" | null;
   declare _matrix: "before" | "after";
   declare _scored: Mode | null;
   declare _mode: Mode | null;
@@ -470,6 +482,7 @@ export class OutglowLearnView extends ViewBase {
     this._consent = false;
     this._voice = storageGet(VOICE_KEY) === "1";
     this._busy = false;
+    this._applying = null;
     this._matrix = "after";
     this._scored = null;
     this._mode = null;
@@ -1522,6 +1535,7 @@ export class OutglowLearnView extends ViewBase {
     const id = this._session?.summary?.pending_id;
     if (!id) return;
     this._busy = true;
+    this._applying = switchMode ? "switch" : "apply";
     try {
       const result = await this.call("outglow/model/apply", switchMode ? { pending_id: id, mode: "bayes" } : { pending_id: id });
       this._result = { kind: "applied", version: result.model_version, mode: switchMode ? "bayes" : null };
@@ -1536,6 +1550,7 @@ export class OutglowLearnView extends ViewBase {
       if (this._result) this._phase = "finished";
     } finally {
       this._busy = false;
+      this._applying = null;
     }
   }
 
@@ -2152,6 +2167,7 @@ export class OutglowLearnView extends ViewBase {
     const bayes = active === "rules" ? (summary.bayes ?? null) : null;
     const emptyHours = summary.empty_house_hours ?? 0;
     const emptyKnown = emptyHours >= EMPTY_KNOWN_H;
+    const emptySetup = summary.empty_setup ?? "none";
     const matrix = this._matrix === "before" ? score.matrix_before : score.matrix_after;
     return html`<div class="wrap">
       <section class="card" aria-labelledby="sum-h">
@@ -2210,8 +2226,15 @@ export class OutglowLearnView extends ViewBase {
               <span>
                 <b>${tw(loc, "empty_unknown")}</b><br />${tw(loc, emptyHours > 0 ? "empty_some" : "empty_none", {
                   minutes: Math.round(emptyHours * 60),
-                  hours: EMPTY_KNOWN_H,
                 })}
+                ${tw(loc, `empty_how_${emptySetup}`, { hours: fmtNumber(loc, summary.empty_needed_h ?? EMPTY_KNOWN_H) })}
+                ${
+                  emptySetup === "none"
+                    ? nothing
+                    : html`<br /><button class="btn" @click=${() => this.navigate("/settings")}>
+                        ${tw(loc, "to_settings")} ${icon(mdiChevronRight, 18)}
+                      </button>`
+                }
               </span>
             </div>`
           : nothing
@@ -2258,22 +2281,11 @@ export class OutglowLearnView extends ViewBase {
           <div class="notice info">${icon(mdiInformation, 20)}<span>${tw(loc, "proposal")}</span></div>
           ${
             suggest
-              ? html`<button
-                    class="btn ${emptyKnown ? "filled" : "tonal"} big"
-                    ?disabled=${this._busy || !summary.pending_id}
-                    @click=${() => void this._apply(true)}
-                  >
-                    ${emptyKnown ? icon(mdiCheck) : nothing} ${this._busy ? tw(loc, "applying") : tw(loc, "switch_apply")}
-                  </button>
-                  <button
-                    class="btn ${emptyKnown ? "tonal" : "filled"} big"
-                    ?disabled=${this._busy || !summary.pending_id}
-                    @click=${() => void this._apply()}
-                  >
-                    ${emptyKnown ? nothing : icon(mdiCheck)} ${tw(loc, "apply_rules")}
-                  </button>`
+              ? emptyKnown
+                ? html`${this._applyButton(summary, true, true)} ${this._applyButton(summary, false, false)}`
+                : html`${this._applyButton(summary, false, true)} ${this._applyButton(summary, true, false)}`
               : html`<button class="btn filled big" ?disabled=${this._busy || !summary.pending_id} @click=${() => void this._apply()}>
-                  ${icon(mdiCheck)} ${this._busy ? tw(loc, "applying") : tw(loc, "apply")}
+                  ${icon(mdiCheck)} ${this._applying === "apply" ? tw(loc, "applying") : tw(loc, "apply")}
                 </button>`
           }
           <div class="row">
@@ -2284,6 +2296,18 @@ export class OutglowLearnView extends ViewBase {
         </div>
       </section>
     </div>`;
+  }
+
+  private _applyButton(summary: SessionSummary, switchMode: boolean, first: boolean) {
+    const loc = this.loc;
+    const pressed = this._applying === (switchMode ? "switch" : "apply");
+    return html`<button
+      class="btn ${first ? "filled" : "tonal"} big"
+      ?disabled=${this._busy || !summary.pending_id}
+      @click=${() => void this._apply(switchMode)}
+    >
+      ${first ? icon(mdiCheck) : nothing} ${pressed ? tw(loc, "applying") : tw(loc, switchMode ? "switch_apply" : "apply_rules")}
+    </button>`;
   }
 
   private _finished() {

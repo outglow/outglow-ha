@@ -24,6 +24,7 @@ class _Dir:
     others_changed: bool = False
     frozen: bool = False
     motion: bool = False
+    heard: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +49,7 @@ class Ingest:
         self._rx = {b: _Rx() for b in topo.bulbs}
         self._light_t: dict[str, float] = {}
         self._offline: frozenset[str] = frozenset()
+        self._cfar: frozenset[str] = frozenset()
         self.messages = 0
 
     def inherit(self, old: Ingest) -> None:
@@ -55,10 +57,14 @@ class Ingest:
         self._rx.update({b: replace(s) for b, s in old._rx.items() if b in self._rx})
         self._light_t = dict(old._light_t)
         self._offline = old._offline
+        self._cfar = old._cfar
         self.messages = old.messages
 
     def set_offline(self, offline: frozenset[str]) -> None:
         self._offline = offline
+
+    def set_cfar(self, cfar: frozenset[str]) -> None:
+        self._cfar = cfar
 
     def light(self, ieee: str, t: float) -> None:
         self._light_t[ieee] = max(t, self._light_t.get(ieee, t))
@@ -80,6 +86,7 @@ class Ingest:
             d.motion = link.motion
             if link.signal_dbm is not None and link.signal_dbm < 0:
                 d.signal = link.signal_dbm
+            d.heard = d.heard or link.motion or d.signal is not None
         if obs.source != "activity":
             return
         if rx.last_activity is not None and 0 < obs.t - rx.last_activity <= INTERVAL_MAX_S:
@@ -121,6 +128,9 @@ class Ingest:
     def motion(self, d: Direction) -> bool:
         return d[0] not in self._offline and self._dirs[d].motion
 
+    def delivering(self, d: Direction) -> bool:
+        return d[0] not in self._offline and d[1] not in self._offline and self._dirs[d].heard
+
     def occupancy(self, rx: str) -> bool:
         return rx not in self._offline and self._rx[rx].occupancy
 
@@ -137,7 +147,7 @@ class Ingest:
         rx, tx = d
         if d in self._topo.excluded:
             return DirSample(None, False, (*flags, "excluded"))
-        if gates[rx] == "offline":
+        if gates[rx] == "offline" or rx in self._cfar:
             return DirSample(None, False, tuple(flags))
         if t - max(self._light_t.get(rx, -math.inf), self._light_t.get(tx, -math.inf)) < BLANK_LIGHT_S:
             return DirSample(None, False, (*flags, "blanked"))

@@ -1,12 +1,12 @@
 import math
 from collections import deque
-from collections.abc import Collection, Iterable, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from dataclasses import dataclass, replace
 from typing import Self
 
 from . import calibrate as cal
 from . import quality as qual
-from .cfar import Cfar
+from .cfar import Basis, Cfar, basis
 from .defaults import (
     A_ON_START,
     ASYM_MIN_H,
@@ -27,7 +27,7 @@ from .defaults import (
     TOP_PAIRS,
     TRAIL_LENGTH,
 )
-from .emission import Emission, code_of, information, params, states_of
+from .emission import Emission, PairParams, code_of, information, params, states_of
 from .ingest import DirSample, Ingest
 from .learn import CENS, CENSORED, EXCEED, NO_DATA, NONE, QUIET, Learner, TickRecord
 from .model import Model, RoomCal
@@ -88,6 +88,43 @@ class Carry:
     active: Model
     records: tuple[TickRecord, ...]
     recorded: int
+    weak: frozenset[Direction] = frozenset()
+
+
+@dataclass(frozen=True, slots=True)
+class Derived:
+    model: Model
+    weak: frozenset[Pair]
+    params: dict[Pair, PairParams]
+    emission: Emission
+    coverage: dict[str, float]
+    pair_weight: dict[Pair, float]
+    cfar: Basis
+    topo: Topology
+    source: dict[str, Json] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ModelCopy:
+    active: Model
+    pending: Model | None
+    pending_seq: int
+    pending_created: float
+
+    def state(self) -> dict[str, Json]:
+        return _state(self.active, self.pending, self.pending_seq, self.pending_created)
+
+    def active_state(self) -> dict[str, Json]:
+        return {"active": model_to_json(self.active)}
+
+
+@dataclass(frozen=True, slots=True)
+class _Lesson:
+    t: float
+    rec: TickRecord | None
+    seq: int
+    prev: TickRecord | None
+    weight: float
 
 
 @dataclass(slots=True)
@@ -138,7 +175,9 @@ class Engine:
         self._trail: deque[tuple[str, float]] = deque(maxlen=TRAIL_LENGTH)
         self.stats = qual.Stats.fresh(self._topo)
         self._carried: int | None = None
-        self._load(self._active)
+        self._staged: Derived | None = None
+        self._held: list[_Lesson] | None = None
+        self._load(self._active, self.derive(self._active, self.weak_pairs()))
 
     def reconfigure(self, settings: Settings) -> None:
         self._settings = settings
@@ -151,16 +190,21 @@ class Engine:
         self._noisy = self._asymmetric(self._active)
 
     def carry(self) -> Carry:
-        return Carry(self._topo, self._active, tuple(self._learner.buffer), self._learner.recorded)
+        weak = frozenset(d for d in self._topo.directions if self._ingest.weak(d))
+        return Carry(self._topo, self._active.clone(), tuple(self._learner.buffer), self._learner.recorded, weak)
 
     @classmethod
     def successor(cls, carry: Carry, plan: Plan, settings: Settings) -> Self:
         engine = cls(plan, settings, {"active": model_to_json(carry.active)})
         engine._learner.adopt(carry.topology, carry.records)
         engine._carried = carry.recorded
+        foreign = engine.foreign_rooms()
+        if foreign:
+            weak = frozenset(p for p in engine._topo.pairs if p in carry.weak or (p[1], p[0]) in carry.weak)
+            engine._staged = engine.derive(_forget(engine._active.clone(), foreign), weak)
         return engine
 
-    def inherit(self, old: Engine) -> Self:
+    def inherit(self, old: Engine, t: float | None = None) -> Self:
         self._ingest.inherit(old._ingest)
         self._pairs.inherit(old._pairs)
         self._rooms.inherit(old._rooms)
@@ -168,8 +212,6 @@ class Engine:
         self._exceed = {d: on for d, on in old._exceed.items() if d in directions}
         self._house = old._house
         self._labels = [lb for lb in old._labels if lb.room is None or lb.room in self._rooms.state]
-        self._empty_run = old._empty_run
-        self._quiet_run = old._quiet_run
         self._trail.extend(item for item in old._trail if item[0] in self._rooms.state)
         self._learner.inherit(old._learner, self._carried)
         self._carried = None
@@ -179,7 +221,13 @@ class Engine:
         self._pending_rooms = old._pending_rooms
         if _same_shape(old._topo, self._topo):
             self.stats = old.stats
-        _forget(self._active, self.foreign_rooms())
+            self._empty_run = old._empty_run
+            self._quiet_run = old._quiet_run
+        foreign = self.foreign_rooms()
+        _forget(self._active, foreign)
+        staged, self._staged = self._staged, None
+        if foreign and t is not None:
+            self._promote(self._active, t, staged)
         if self._pending is not None:
             _forget(self._pending, set(_model_rooms(self._pending)) - set(self._topo.rooms))
         learned = self._pending_rooms is None or not self._pending_rooms.isdisjoint(self._topo.rooms)
@@ -198,20 +246,37 @@ class Engine:
     def mode(self) -> Mode:
         return self._mode
 
-    def _load(self, model: Model) -> None:
-        self._params = params(self._topo, model, self._weak_pair, self._options.geometric, self._options.learned)
-        self._emission = Emission(self._topo, self._params, self._states, binary=not self._options.agree)
+    def derive(self, model: Model, weak: frozenset[Pair]) -> Derived:
+        topo = self._topo
+        pair_params = params(topo, model, weak.__contains__, self._options.geometric, self._options.learned)
+        emission = Emission(topo, pair_params, self._states, binary=not self._options.agree)
+        info = {p: [information(pair_params[p], r) for r in topo.rooms] for p in topo.pairs}
+        coverage = {r: sum(info[p][i] for p in topo.pairs) for i, r in enumerate(topo.rooms)}
+        weight = {p: round(min(1.0, max(info[p], default=0.0)), 3) for p in topo.pairs}
+        cfar = basis(topo.directions, model, self._cfar.fixed)
+        return Derived(model, weak, pair_params, emission, coverage, weight, cfar, topo)
+
+    def derive_state(self, active: dict[str, Json], weak: frozenset[Pair]) -> Derived:
+        return replace(self.derive(model_from_json(active), weak), source=active)
+
+    def weak_pairs(self) -> frozenset[Pair]:
+        return frozenset(p for p in self._topo.pairs if self._ingest.weak(p) or self._ingest.weak((p[1], p[0])))
+
+    def pending_model(self) -> Model | None:
+        return None if self._pending is None else self._pending.clone()
+
+    def reset_model(self, room: str | None = None) -> Model:
+        return Model() if room is None else _forget(self._active.clone(), {room})
+
+    def _load(self, model: Model, ready: Derived) -> None:
+        self._params = ready.params
+        self._emission = ready.emission
+        self._coverage = ready.coverage
+        self._pair_weight = ready.pair_weight
+        self._cfar.load(ready.cfar)
         self._rooms.a_on = {r: model.rooms[r].a_on if r in model.rooms else A_ON_START for r in self._topo.rooms}
-        self._coverage = {r: sum(information(self._params[p], r) for p in self._topo.pairs) for r in self._topo.rooms}
-        self._pair_weight = {
-            p: round(min(1.0, max((information(self._params[p], r) for r in self._topo.rooms), default=0.0)), 3)
-            for p in self._topo.pairs
-        }
         self._noisy = self._asymmetric(model)
         self._refreshed = -math.inf
-
-    def _weak_pair(self, pair: Pair) -> bool:
-        return self._ingest.weak(pair) or self._ingest.weak((pair[1], pair[0]))
 
     def _asymmetric(self, model: Model) -> frozenset[Direction]:
         hours = model.bg_ticks * self._settings.global_.tick_s / 3600
@@ -225,6 +290,7 @@ class Engine:
 
     def context(self, ctx: Context) -> None:
         self._ingest.set_offline(ctx.offline)
+        self._ingest.set_cfar(ctx.cfar)
         self._house = ctx.house_empty
         for event in ctx.light_events:
             self.light(event)
@@ -255,7 +321,7 @@ class Engine:
         if not self._settings.global_.sensing:
             return
         if t - self._refreshed >= CFAR_REFRESH_S:
-            self._cfar.refresh(self._active, self._ingest.signal)
+            self._cfar.refresh(self._ingest.signal)
             self._refreshed = t
         gates = self._ingest.gates(t)
         samples = self._ingest.tick(t, gates)
@@ -272,6 +338,7 @@ class Engine:
         self._last = _Tick(t, samples, z, tick, codes)
         before = {r: s.motion for r, s in self._rooms.state.items()}
         if self._mode == "rules":
+            self._rules.live(self._ingest.delivering)
             zones = self._rules.zones(self._ingest.motion)
             self._rooms.decide(t, {r: 1.0 if on else 0.0 for r, on in zones.items()}, self._house, self._hold, True)
         else:
@@ -314,26 +381,42 @@ class Engine:
         )
         prev = self._learner.buffer[-1] if self._learner.buffer else None
         self._learner.record(rec)
+        self._empty_run = (
+            self._empty_run + 1 if self._house in ("yes", "soft") and self._settings.global_.learning else 0
+        )
         if not self._settings.global_.learning:
             return
         margin = max(1, round(EMPTY_MARGIN_S / self._settings.global_.tick_s))
-        self._empty_run = self._empty_run + 1 if self._house in ("yes", "soft") else 0
         if self._empty_run > 2 * margin:
-            buffer = self._learner.buffer
-            target, before = buffer[-margin - 1], buffer[-margin - 2]
+            target = self._learner.buffer[-margin - 1]
             weight = 1.0 if target.empty == "yes" else SOFT_EMPTY_WEIGHT
-            self._learner.background(self._ensure_pending(t), target, before, weight, cfar=True, pairs=weight == 1.0)
-            self._touch(None)
+            self._teach(_Lesson(t, None, self._learner.recorded - margin - 1, None, weight))
         quiet = self._house not in ("yes", "soft") and all(p < QUIET_BACKGROUND_P for p in rec.p)
         self._quiet_run = self._quiet_run + 1 if quiet else 0
         if (
             self._settings.global_.quiet_background
             and self._quiet_run * self._settings.global_.tick_s >= QUIET_BACKGROUND_S
         ):
-            self._learner.background(
-                self._ensure_pending(t), rec, prev, QUIET_BACKGROUND_WEIGHT, cfar=True, pairs=False
-            )
-            self._touch(None)
+            self._teach(_Lesson(t, rec, 0, prev, QUIET_BACKGROUND_WEIGHT))
+
+    def _teach(self, lesson: _Lesson) -> None:
+        if self._held is not None:
+            self._held.append(lesson)
+            return
+        model = self._ensure_pending(lesson.t)
+        if lesson.rec is None:
+            self._learner.empty_tick(model, lesson.seq, lesson.weight)
+        else:
+            self._learner.background(model, lesson.rec, lesson.prev, lesson.weight)
+        self._touch(None)
+
+    def hold_background(self) -> None:
+        self._held = [] if self._held is None else self._held
+
+    def release_background(self) -> None:
+        held, self._held = self._held or [], None
+        for lesson in held:
+            self._teach(lesson)
 
     def _process_labels(self, t: float) -> None:
         ready = [lb for lb in self._labels if lb.t1 <= t]
@@ -344,7 +427,7 @@ class Engine:
 
     def _ensure_pending(self, t: float) -> Model:
         if self._pending is None:
-            self._pending = self._active.copy()
+            self._pending = self._active.clone()
             self._pending_seq += 1
             self._pending_created = t
             self._pending_rooms = frozenset()
@@ -529,33 +612,58 @@ class Engine:
             "pending": pending,
         }
 
+    def applied_empty_s(self) -> float:
+        return self.empty_preview()()
+
+    def empty_preview(self) -> Callable[[], float]:
+        model = (self._active if self._pending is None else self._pending).clone()
+        learner = self._learner.copy()
+        labels = tuple(self._labels)
+
+        def run() -> float:
+            for label in labels:
+                learner.label(model, label)
+            return model.empty_s
+
+        return run
+
     def pending_id(self) -> str | None:
         return None if self._pending is None else f"p-{self._active.version + 1:04d}-{self._pending_seq:04d}"
 
-    def apply(self, pending_id: str, t: float) -> int:
+    def apply(self, pending_id: str, t: float, ready: Derived | None = None) -> int:
         if self._pending is None or pending_id != self.pending_id():
             raise KeyError(pending_id)
         model, self._pending = self._pending, None
-        return self._promote(model, t)
+        return self._promote(model, t, ready)
 
-    def reset(self, t: float, room: str | None = None) -> int:
+    def reset(self, t: float, room: str | None = None, ready: Derived | None = None) -> int:
         if room is None:
             self._pending = None
-            return self._promote(Model(), t)
-        if self._pending is not None:
+        elif self._pending is not None:
             _forget(self._pending, {room})
-        return self._promote(_forget(self._active.copy(), {room}), t)
+        return self._promote(self.reset_model(room), t, ready)
 
-    def restore(self, active: dict[str, Json], t: float) -> int:
+    def restore(self, active: dict[str, Json], t: float, ready: Derived | None = None) -> int:
         self._pending = None
-        return self._promote(model_from_json(active), t)
+        model = ready.model if ready is not None and ready.source is active else model_from_json(active)
+        return self._promote(model, t, ready)
 
-    def _promote(self, model: Model, t: float) -> int:
+    def _promote(self, model: Model, t: float, ready: Derived | None = None) -> int:
+        derived = self._fitting(model, ready)
         model.version = self._active.version + 1
         model.updated = t
         self._active = model
-        self._load(model)
+        self._load(model, derived)
         return model.version
+
+    def _fitting(self, model: Model, ready: Derived | None) -> Derived:
+        return ready if ready is not None and self._fits(model, ready) else self.derive(model, self.weak_pairs())
+
+    def _fits(self, model: Model, ready: Derived) -> bool:
+        return ready.topo is self._topo and ready.weak == self.weak_pairs() and ready.model == model
+
+    def pending_fits(self, ready: Derived) -> bool:
+        return self._pending is not None and self._fits(self._pending, ready)
 
     def discard(self, pending_id: str) -> None:
         if self._pending is None or pending_id != self.pending_id():
@@ -563,14 +671,11 @@ class Engine:
         self._pending = None
 
     def model_state(self) -> dict[str, Json]:
-        return {
-            "format": MODEL_FORMAT,
-            "model_version": self._active.version,
-            "active": model_to_json(self._active),
-            "pending": None if self._pending is None else model_to_json(self._pending),
-            "pending_seq": self._pending_seq,
-            "pending_created": self._pending_created,
-        }
+        return _state(self._active, self._pending, self._pending_seq, self._pending_created)
+
+    def model_copy(self) -> ModelCopy:
+        pending = None if self._pending is None else self._pending.clone()
+        return ModelCopy(self._active.clone(), pending, self._pending_seq, self._pending_created)
 
     @classmethod
     def replay(
@@ -628,6 +733,17 @@ def _bursts(samples: Iterable[Observation], step: float) -> Iterator[tuple[float
             k = math.ceil(upcoming.t / step)
         else:
             k += 1
+
+
+def _state(active: Model, pending: Model | None, seq: int, created: float) -> dict[str, Json]:
+    return {
+        "format": MODEL_FORMAT,
+        "model_version": active.version,
+        "active": model_to_json(active),
+        "pending": None if pending is None else model_to_json(pending),
+        "pending_seq": seq,
+        "pending_created": created,
+    }
 
 
 def _same_shape(a: Topology, b: Topology) -> bool:

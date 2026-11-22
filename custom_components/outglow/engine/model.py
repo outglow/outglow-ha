@@ -1,5 +1,5 @@
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from itertools import accumulate
 
@@ -46,19 +46,33 @@ class Hist:
         total = self.observed
         if total <= 0:
             return 0.0, 0.0
-        med = _weighted_median([(i * HIST_WIDTH + HIST_WIDTH / 2, b) for i, b in enumerate(self.bins)], total)
-        mad = _weighted_median(
-            sorted((abs(i * HIST_WIDTH + HIST_WIDTH / 2 - med), b) for i, b in enumerate(self.bins)), total
-        )
-        return med, mad
+        half = total / 2
+        middle = _reaching(range(HIST_BINS), self.bins, half)
+        med = _centre(middle)
+        return med, abs(_centre(_reaching(_outward(middle, self.bins), self.bins, half)) - med)
 
     def to_json(self) -> Json:
         return {"bins": [round(b, 6) for b in self.bins], "censored": round(self.censored, 6)}
 
 
-def _weighted_median(items: list[tuple[float, float]], total: float) -> float:
-    sums = accumulate(weight for _, weight in items)
-    return next((value for (value, _), acc in zip(items, sums, strict=True) if acc >= total / 2), items[-1][0])
+def _centre(index: int) -> float:
+    return index * HIST_WIDTH + HIST_WIDTH / 2
+
+
+def _outward(middle: int, bins: list[float]) -> Iterator[int]:
+    yield middle
+    for step in range(1, HIST_BINS):
+        yield from sorted((i for i in (middle - step, middle + step) if 0 <= i < HIST_BINS), key=bins.__getitem__)
+
+
+def _reaching(order: Iterable[int], bins: list[float], half: float) -> int:
+    acc = 0.0
+    index = 0
+    for index in order:
+        acc += bins[index]
+        if acc >= half:
+            return index
+    return index
 
 
 @dataclass(slots=True)
@@ -83,8 +97,21 @@ class Model:
     decay_t: float | None = None
     entries: dict[str, list[float]] = field(default_factory=dict)
 
-    def copy(self) -> Model:
-        return from_json(to_json(self))
+    def clone(self) -> Model:
+        return Model(
+            version=self.version,
+            updated=self.updated,
+            hist={d: Hist(h.bins[:], h.censored) for d, h in self.hist.items()},
+            bg_ticks=self.bg_ticks,
+            bg_onsets=dict(self.bg_onsets),
+            pair_bg={p: v[:] for p, v in self.pair_bg.items()},
+            emit={k: v[:] for k, v in self.emit.items()},
+            rooms={r: RoomCal(c.a_on, c.false_per_day, c.detection) for r, c in self.rooms.items()},
+            labels=dict(self.labels),
+            empty_s=self.empty_s,
+            decay_t=self.decay_t,
+            entries={r: v[:] for r, v in self.entries.items()},
+        )
 
     def hist_of(self, d: Direction) -> Hist:
         return self.hist.setdefault(d, Hist())
@@ -101,6 +128,7 @@ class Model:
         for h in self.hist.values():
             h.scale(ref)
         self.bg_ticks *= ref
+        self.empty_s *= ref
         self.bg_onsets = {d: v * ref for d, v in self.bg_onsets.items()}
         self.pair_bg = {p: [c * ref for c in v] for p, v in self.pair_bg.items()}
         self.emit = {k: [c * learn for c in v] for k, v in self.emit.items()}

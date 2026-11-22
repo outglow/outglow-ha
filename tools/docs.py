@@ -32,7 +32,7 @@ ENTITY_NOTES = {
     "occupancy": "On while the room has motion or is inside its hold time; unavailable when no pair covers the room.",
     "home_motion": "Motion in any room; turns off 10 s after the last motion.",
     "motion_room": "The room with the freshest, most certain motion, or `none`.",
-    "status": "Whether the model is still learning, ready, degraded (bulbs missing) or paused.",
+    "status": "Learning, ready, degraded (bulbs missing), paused, or stopped by a plan over the limits.",
     "false_alarms_24h": "False alarms in the last 24 hours (from feedback and empty-home periods).",
     "sensing": "Pauses the whole pipeline; room entities become unavailable.",
     "learning": "Background learning; proposals still wait for Apply in the panel.",

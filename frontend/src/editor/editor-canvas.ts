@@ -30,6 +30,7 @@ import {
 } from "../geometry";
 import { strings, type Loc } from "../i18n";
 import { icon } from "../icons";
+import { Backdrop, backdrop } from "../background";
 import { shared, tokens } from "../theme";
 import {
   addDoor,
@@ -49,6 +50,7 @@ import {
   wallIndex,
   wallOffset,
   wallSelection,
+  vertexSelection,
   doorSelection,
   updateDoor,
   type Selection,
@@ -151,6 +153,9 @@ export class OutglowEditorCanvas extends LitElement {
     ghost: { attribute: false },
     flagged: { attribute: false },
     keepRatio: { type: Boolean },
+    reserved: { attribute: false },
+    background: { attribute: false },
+    dark: { type: Boolean },
     _size: { state: true },
     _view: { state: true },
     _poly: { state: true },
@@ -173,6 +178,9 @@ export class OutglowEditorCanvas extends LitElement {
   declare ghost: { ieee: string; point: Point } | null;
   declare flagged: Set<string>;
   declare keepRatio: boolean;
+  declare reserved: string[];
+  declare background: string | null;
+  declare dark: boolean;
   declare _size: [number, number];
   declare _view: View;
   declare _poly: Point[];
@@ -189,6 +197,7 @@ export class OutglowEditorCanvas extends LitElement {
   private _pointers = new Map<number, [number, number]>();
   private _fitted = false;
   private _downHit: DOMStringMap | null = null;
+  private _backdrop = new Backdrop(this);
 
   constructor() {
     super();
@@ -200,6 +209,7 @@ export class OutglowEditorCanvas extends LitElement {
     this.names = {};
     this.ghost = null;
     this.flagged = new Set();
+    this.reserved = [];
     this._size = [0, 0];
     this._view = { cx: 3, cy: 3, s: 60 };
     this._poly = [];
@@ -211,6 +221,8 @@ export class OutglowEditorCanvas extends LitElement {
     this._coarse = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
     this._dragging = null;
     this.keepRatio = false;
+    this.background = null;
+    this.dark = false;
   }
 
   static override styles = [
@@ -250,6 +262,9 @@ export class OutglowEditorCanvas extends LitElement {
       svg.plan.dragging,
       svg.plan.dragging * {
         cursor: var(--og-drag-cursor, grabbing) !important;
+      }
+      .backdrop.dark {
+        filter: invert(1) hue-rotate(180deg);
       }
       .grid-minor {
         stroke: color-mix(in srgb, var(--og-fg) 7%, transparent);
@@ -338,6 +353,18 @@ export class OutglowEditorCanvas extends LitElement {
       }
       .handle:hover {
         fill: var(--og-primary);
+      }
+      .handle.selected {
+        fill: var(--og-primary);
+        stroke: var(--og-card);
+        stroke-width: 3;
+      }
+      .handle-ring {
+        fill: none;
+        stroke: var(--og-primary);
+        stroke-width: 2;
+        vector-effect: non-scaling-stroke;
+        pointer-events: none;
       }
       .edge-hit {
         stroke: transparent;
@@ -438,6 +465,9 @@ export class OutglowEditorCanvas extends LitElement {
         pointer-events: none;
       }
       .pin {
+        cursor: grab;
+      }
+      .pin.inert {
         pointer-events: none;
       }
       .pin circle {
@@ -554,6 +584,9 @@ export class OutglowEditorCanvas extends LitElement {
   }
 
   override willUpdate(changed: PropertyValues<this>): void {
+    if (changed.has("background")) {
+      this._backdrop.show(this.background ? { url: this.background } : null);
+    }
     if (changed.has("tool")) {
       this._poly = [];
       this._rect = null;
@@ -593,6 +626,10 @@ export class OutglowEditorCanvas extends LitElement {
     const cx = before[0] - (px - w / 2) / s;
     const cy = before[1] - (py - h / 2) / s;
     this._view = { cx, cy, s };
+  }
+
+  focusPlan(visible: boolean): void {
+    this.renderRoot.querySelector<SVGSVGElement>("svg.plan")?.focus({ preventScroll: true, focusVisible: visible } as FocusOptions);
   }
 
   cancel(): boolean {
@@ -818,7 +855,7 @@ export class OutglowEditorCanvas extends LitElement {
 
   private _createRoom(outline: Point[]): void {
     const name = t(this.loc, "new_room", { n: this.plan.rooms.length + 1 });
-    const result = addRoom(this.plan, outline, name);
+    const result = addRoom(this.plan, outline, name, this.reserved);
     this._edit(result.plan, true);
     this._select({ kind: "room", id: result.id });
     this._emit("tool", { tool: "select", created: result.id });
@@ -1051,6 +1088,10 @@ export class OutglowEditorCanvas extends LitElement {
         return;
       }
       case "vertex":
+        this._snap = null;
+        if (drag.moved) this._edit(this.plan, true);
+        else this._select(vertexSelection(this.plan, drag.room, drag.index));
+        return;
       case "room":
       case "bulb":
       case "door":
@@ -1083,7 +1124,11 @@ export class OutglowEditorCanvas extends LitElement {
       }
       return;
     }
-    const hit = this._downHit?.hit === "edge" ? this._downHit : this._hit(event);
+    const hit = this._downHit?.hit === "edge" || this._downHit?.hit === "vertex" ? this._downHit : this._hit(event);
+    if (hit?.hit === "vertex" && hit.room) {
+      if (!this._coarse) this._emit("remove-corner", { id: hit.room, index: Number(hit.index) });
+      return;
+    }
     if (hit?.hit === "edge" && hit.room) {
       const room = this.plan.rooms.find((r) => r.id === hit.room);
       const edge = Number(hit.index);
@@ -1137,7 +1182,7 @@ export class OutglowEditorCanvas extends LitElement {
         @wheel=${this._wheel}
         @contextmenu=${(e: Event) => e.preventDefault()}
       >
-        ${this._grid(vb)} ${this.plan.rooms.map((r) => this._room(r))} ${this._walls()} ${this._doors()} ${this._selectedRoom()}
+        ${backdrop(this._backdrop.url, this._backdrop.size, this.plan.background, this.dark)} ${this._grid(vb)} ${this.plan.rooms.map((r) => this._room(r))} ${this._walls()} ${this._doors()} ${this._selectedRoom()}
         ${this._doorPreview()} ${this.plan.rooms.map((r) => this._roomLabel(r))} ${this._bulbs()} ${this._ghost()} ${this._draft()}
         ${this._snapMark()} ${this._alignGuides(vb)}
       </svg>
@@ -1183,8 +1228,9 @@ export class OutglowEditorCanvas extends LitElement {
 
   private _isSelected(kind: "room" | "door" | "bulb", key: string | number): boolean {
     const sel = this.selection;
-    if (!sel || sel.kind !== kind) return false;
+    if (!sel || (sel.kind !== kind && !(kind === "room" && sel.kind === "vertex"))) return false;
     if (sel.kind === "room") return sel.id === key;
+    if (sel.kind === "vertex") return kind === "room" && sel.id === key;
     if (sel.kind === "bulb") return sel.ieee === key;
     return sel.kind === "door" && sel.index === key;
   }
@@ -1261,7 +1307,7 @@ export class OutglowEditorCanvas extends LitElement {
 
   private _selectedRoom() {
     const sel = this.selection;
-    if (sel?.kind !== "room" || this.tool !== "select") return nothing;
+    if ((sel?.kind !== "room" && sel?.kind !== "vertex") || this.tool !== "select") return nothing;
     const room = this.plan.rooms.find((r) => r.id === sel.id);
     if (!room) return nothing;
     const points = room.outline.map((p) => p.join(",")).join(" ");
@@ -1299,7 +1345,11 @@ export class OutglowEditorCanvas extends LitElement {
       ${dims}
       ${this._grips(room)}
       ${room.outline.map(
-        (p, i) => svg`<circle class="handle" data-hit="vertex" data-room=${room.id} data-index=${i} cx=${p[0]} cy=${p[1]} r=${r}></circle>`,
+        (p, i) => {
+          const picked = sel.kind === "vertex" && sel.index === i;
+          return svg`${picked ? svg`<circle class="handle-ring" cx=${p[0]} cy=${p[1]} r=${r * 1.9}></circle>` : nothing}
+            <circle class="handle ${picked ? "selected" : ""}" data-hit="vertex" data-room=${room.id} data-index=${i} cx=${p[0]} cy=${p[1]} r=${r}></circle>`;
+        },
       )}
       ${this._sizeTag(room)}`;
   }
@@ -1393,10 +1443,11 @@ export class OutglowEditorCanvas extends LitElement {
     return this.plan.bulbs.map((bulb) => {
       const selected = this._isSelected("bulb", bulb.ieee);
       const name = this.names[bulb.ieee] ?? bulb.ieee.slice(-4);
+      const hit = this.tool === "select" || this.tool === "bulb";
       return svg`<g>
-        ${this._bulbGlyph(bulb.x, bulb.y, selected, flaggedBulbs.has(bulb.ieee), this.tool === "select" || this.tool === "bulb", bulb.ieee)}
+        ${this._bulbGlyph(bulb.x, bulb.y, selected, flaggedBulbs.has(bulb.ieee), hit, bulb.ieee)}
         ${bulb.room !== null
-          ? svg`<g class="pin" data-pinned=${bulb.ieee} transform="translate(${bulb.x + this._px(6)} ${bulb.y - this._px(24)}) scale(${this._px(18) / 24})">
+          ? svg`<g class="pin ${hit ? "" : "inert"}" data-pinned=${bulb.ieee} data-hit="bulb" data-ieee=${bulb.ieee} transform="translate(${bulb.x + this._px(6)} ${bulb.y - this._px(24)}) scale(${this._px(18) / 24})">
               <title>${t(this.loc, "pinned", { room: this.plan.rooms.find((r) => r.id === bulb.room)?.name ?? bulb.room })}</title>
               <circle cx="12" cy="12" r="12"></circle><path transform="translate(4 4) scale(0.667)" d=${mdiPin}></path></g>`
           : nothing}

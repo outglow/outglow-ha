@@ -8,14 +8,14 @@ from pytest_homeassistant_custom_component.typing import MqttMockHAClient
 
 from custom_components.outglow.const import DOMAIN
 from custom_components.outglow.engine.source import SourceClassifier
-from custom_components.outglow.engine.types import LinkReading, Observation
+from custom_components.outglow.engine.types import Context, LinkReading, Observation
 from custom_components.outglow.mqtt_source import (
     loads_finite,
     parse_link,
     parse_observation,
     parse_online,
 )
-from tests.integration.common import BULBS, OTHER, Clock, bridge, bulb_state, fire, setup_outglow
+from tests.integration.common import BULBS, OTHER, Clock, bridge, bulb_state, fire, setup_outglow, with_plan
 
 RX = "0x0000000000000001"
 
@@ -185,3 +185,72 @@ def test_loads_finite_rejects_nan_and_infinity() -> None:
         with pytest.raises(ValueError, match="finite"):
             loads_finite(f'{{"a": {bad}}}')
     assert loads_finite('{"a": 1.5, "b": [2]}') == {"a": 1.5, "b": [2]}
+
+
+def test_parse_observation_drops_cfar_statistics() -> None:
+    data = bulb_state(RX, activity=7, motion=True)
+    parsed = parse_observation(5.0, RX, data, cfar=True)
+    assert parsed is not None
+    assert parsed.occupancy is True
+    assert parsed.links
+    assert all(link.raw_activity is None and link.noise_db is None for link in parsed.links)
+    assert all(link.motion and link.signal_dbm == -70 for link in parsed.links)
+
+
+async def test_a_cfar_bulb_gives_no_line_observations_until_it_goes_back_to_rule(
+    hass: HomeAssistant, mqtt_mock: MqttMockHAClient, clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _entry, coordinator = await setup_outglow(hass, clock)
+    await bridge(hass)
+    await with_plan(hass, coordinator)
+    seen: list[Observation] = []
+    original = coordinator.observe
+
+    def capture(item: Observation) -> None:
+        seen.append(item)
+        original(item)
+
+    monkeypatch.setattr(coordinator, "observe", capture)
+    cfar, rule = RX, "0x0000000000000002"
+
+    def stream(detector: str | None, start: int) -> None:
+        for i in range(4):
+            clock.advance(0.5)
+            state = bulb_state(cfar, activity=start + i)
+            fire(hass, BULBS[cfar], state if detector is None else {**state, "motion_detector": detector})
+            fire(hass, BULBS[rule], bulb_state(rule, activity=start + i))
+
+    def levels() -> dict[tuple[str, str], int | None]:
+        frame = coordinator.tick()
+        return {(d.rx, d.tx): d.level for d in frame.directions if d.state != "quiet_censored"}
+
+    stream(None, 10)
+    await hass.async_block_till_done()
+    before = levels()
+    assert before[(cfar, rule)] == 13
+    assert before[(rule, cfar)] == 13
+    assert coordinator.devices.cfar() == frozenset()
+    assert {b["ieee"]: b["detector"] for b in coordinator.bulb_infos()}[cfar] == "rule"
+
+    seen.clear()
+    stream("cfar", 100)
+    await hass.async_block_till_done()
+    assert coordinator.devices.cfar() == frozenset({cfar})
+    mine = [o for o in seen if o.rx == cfar]
+    assert mine
+    assert all(link.level is None and link.raw_activity is None for o in mine for link in o.links)
+    assert any(o.links[0].level == 103 for o in seen if o.rx == rule)
+    during = coordinator.tick()
+    assert all(d.level is None and d.state == "none" for d in during.directions if d.rx == cfar)
+    assert next(d.level for d in during.directions if (d.rx, d.tx) == (rule, cfar)) == 103
+    assert {b["ieee"]: b["detector"] for b in coordinator.bulb_infos()}[cfar] == "cfar"
+    preview = coordinator.writer.preview(cfar, "calibrate", "start", clock())
+    assert preview["effects"][0] == {"code": "starts_calibration", "params": {"seconds": 900}}
+    await coordinator.async_flush_history()
+    raw = await hass.async_add_executor_job(coordinator.history.records, 0.0, 1e12)
+    assert any(isinstance(r, Context) and r.cfar == frozenset({cfar}) for r in raw)
+
+    stream("rule", 200)
+    await hass.async_block_till_done()
+    assert coordinator.devices.cfar() == frozenset()
+    assert levels()[(cfar, rule)] == 203

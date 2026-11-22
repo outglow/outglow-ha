@@ -73,7 +73,7 @@ class HomeMotion(OutglowEntity, BinarySensorEntity):
     def _refresh(self) -> bool:
         c = self.coordinator
         frame = c.frame
-        available = c.settings.global_.sensing and frame is not None
+        available = c.settings.global_.sensing and frame is not None and c.plan_problem is None
         if frame is not None and any(rf.motion for rf in frame.rooms.values()):
             self._moved = frame.t
         on = frame is not None and self._moved is not None and frame.t - self._moved < MOTION_OFF_DELAY_S

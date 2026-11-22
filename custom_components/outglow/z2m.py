@@ -1,19 +1,23 @@
 import json
+import logging
 import re
 import secrets
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from homeassistant.components import mqtt
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 
-from .const import OUTGLOW_MODELS, TOKEN_TTL_S
+from .const import OUTGLOW_MODELS, SESSION_RATE, TOKEN_TTL_S
 from .errors import OutglowError
 
+_LOGGER = logging.getLogger(__name__)
 IEEE = re.compile(r"^0x[0-9a-f]{16}$")
 Setting = Literal["sensing", "sensitivity", "probes", "auto_calibration", "self_tuning", "calibrate"]
 BulbValue = int | bool | str
+Detector = Literal["rule", "cfar"]
 SETTINGS: tuple[Setting, ...] = ("sensing", "sensitivity", "probes", "auto_calibration", "self_tuning", "calibrate")
 Z2M_KEYS: dict[Setting, str] = {
     "sensing": "motion_sensing",
@@ -24,7 +28,7 @@ Z2M_KEYS: dict[Setting, str] = {
     "calibrate": "motion_calibrate",
 }
 RANGES: dict[Setting, tuple[int, int]] = {"sensitivity": (0, 100), "probes": (0, 10)}
-CALIBRATION_S = 60
+CALIBRATION_S: dict[Detector, int] = {"rule": 60, "cfar": 900}
 DEFAULT_PROBES = 5
 
 
@@ -149,6 +153,13 @@ class Z2MDevices:
         except ValueError:
             return None
 
+    def detector(self, device: Device) -> Detector:
+        value = device.state.get("motion_detector")
+        return "cfar" if isinstance(value, str) and value.lower() == "cfar" else "rule"
+
+    def cfar(self) -> frozenset[str]:
+        return frozenset(d.ieee for d in self._by_ieee.values() if d.outglow and self.detector(d) == "cfar")
+
     def sensing(self, device: Device) -> bool:
         value = device.state.get("motion_sensing")
         return value is True or (isinstance(value, str) and value.upper() == "ON")
@@ -220,7 +231,9 @@ def effects(devices: Z2MDevices, device: Device, setting: Setting, value: BulbVa
                 out.append({"code": "overwrites_all_lines", "params": {"lines": lines}})
         case "calibrate":
             if value == "start":
-                out.append({"code": "starts_calibration", "params": {"seconds": CALIBRATION_S}})
+                out.append(
+                    {"code": "starts_calibration", "params": {"seconds": CALIBRATION_S[devices.detector(device)]}}
+                )
                 out.append({"code": "overwrites_all_lines", "params": {"lines": lines}})
         case "self_tuning":
             pass
@@ -295,10 +308,11 @@ class BulbWriter:
         )
         return {"written": True, "t": now}
 
-    async def async_set_activity_rate(self, ieee: str, rate: float, reason: str) -> None:
+    async def async_set_activity_rate(self, ieee: str, rate: float, reason: str, assume: bool = True) -> None:
         await async_publish_activity_rate(self._hass, self._base, ieee, rate)
         previous = self._devices.activity_rate(ieee)
-        self._devices.options.setdefault(ieee, {})["motion_activity_rate"] = rate
+        if assume:
+            self._devices.options.setdefault(ieee, {})["motion_activity_rate"] = rate
         self._record(
             "bulb_write",
             {"ieee": ieee, "setting": "activity_rate", "value": rate, "previous": previous, "by": reason},
@@ -312,3 +326,40 @@ async def async_publish_activity_rate(hass: HomeAssistant, base: str, ieee: str,
     value = int(rate) if float(rate).is_integer() else rate
     payload = {"id": ieee, "options": {"motion_activity_rate": value}}
     await mqtt.async_publish(hass, f"{base}/bridge/request/device/options", json.dumps(payload, separators=(",", ":")))
+
+
+async def async_restore_raised(
+    devices: Z2MDevices, rates: dict[str, float], sent: set[str], publish: Callable[[str, float], Awaitable[None]]
+) -> bool:
+    if not devices.info_seen or devices.bridge_online is not True:
+        return True
+    for ieee, rate in sorted(rates.items()):
+        current = devices.activity_rate(ieee)
+        if current != rate and current != SESSION_RATE:
+            _LOGGER.info("%s no longer reports at the raised rate (%s); leaving it", ieee, current)
+        if current != SESSION_RATE or current == rate:
+            del rates[ieee]
+            sent.discard(ieee)
+            continue
+        if ieee in sent:
+            continue
+        try:
+            await publish(ieee, rate)
+        except HomeAssistantError as err:
+            _LOGGER.warning("Could not restore the activity rate of %s (%s); trying again", ieee, err)
+            return False
+        sent.add(ieee)
+    return True
+
+
+def follow_reconnect(
+    hass: HomeAssistant, sent: Callable[[], Iterable[set[str]]], retry: Callable[[], None]
+) -> CALLBACK_TYPE:
+    @callback
+    def connected(state: bool) -> None:
+        if state:
+            for item in sent():
+                item.clear()
+            retry()
+
+    return mqtt.async_subscribe_connection_status(hass, connected)

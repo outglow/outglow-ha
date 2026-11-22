@@ -6,6 +6,8 @@ import {
   mdiChevronLeft,
   mdiChevronRight,
   mdiCloseCircle,
+  mdiDeleteSweepOutline,
+  mdiEraser,
   mdiHistory,
   mdiHomeExportOutline,
   mdiHomeImportOutline,
@@ -107,6 +109,10 @@ const th = strings(
     kind_model_apply: "Model changes applied",
     kind_model_discard: "Model changes discarded",
     kind_model_rollback: "Model rolled back",
+    kind_model_reset: "Learning reset",
+    kind_model_reset_room: "Learning reset in {room}",
+    kind_snapshot_delete: "Snapshot deleted",
+    kind_snapshot_delete_all: "All snapshots deleted ({n})",
     kind_session_start: "Learning session started",
     kind_session_stop: "Learning session ended",
     kind_house_empty: "Nobody home",
@@ -177,6 +183,10 @@ const th = strings(
     kind_model_apply: "Zastosowano zmiany modelu",
     kind_model_discard: "Odrzucono zmiany modelu",
     kind_model_rollback: "Cofnięto model",
+    kind_model_reset: "Wyczyszczono naukę",
+    kind_model_reset_room: "Wyczyszczono naukę: {room}",
+    kind_snapshot_delete: "Usunięto migawkę",
+    kind_snapshot_delete_all: "Usunięto wszystkie migawki ({n})",
     kind_session_start: "Początek sesji nauki",
     kind_session_stop: "Koniec sesji nauki",
     kind_house_empty: "Nikogo nie ma w domu",
@@ -237,6 +247,8 @@ const STYLE: Record<EventKind, Style> = {
   model_apply: { path: mdiBrain, tone: "primary" },
   model_discard: { path: mdiTrashCanOutline, tone: "fg" },
   model_rollback: { path: mdiRestore, tone: "primary" },
+  model_reset: { path: mdiEraser, tone: "primary" },
+  snapshot_delete: { path: mdiDeleteSweepOutline, tone: "fg" },
   house_empty: { path: mdiHomeExportOutline, tone: "fg" },
   house_occupied: { path: mdiHomeImportOutline, tone: "fg" },
 };
@@ -1094,6 +1106,10 @@ export class OutglowHistoryView extends ViewBase {
     switch (event.kind) {
       case "veto":
         return d.rx ? th(loc, "kind_veto_receiver", { bulb: this.bulbName(String(d.rx)) }) : th(loc, "kind_veto");
+      case "model_reset":
+        return event.room ? th(loc, "kind_model_reset_room", { room }) : th(loc, "kind_model_reset");
+      case "snapshot_delete":
+        return d.all === true ? th(loc, "kind_snapshot_delete_all", { n: scalar(d.deleted) }) : th(loc, "kind_snapshot_delete");
       case "label": {
         const activity = String(d.activity ?? "any");
         const key = (["walk", "still", "any"].includes(activity) ? `activity_${activity}` : "activity_any") as Key;
@@ -1122,7 +1138,7 @@ export class OutglowHistoryView extends ViewBase {
       const source = String(d.source);
       return ["feedback", "night_calibration"].includes(source) ? th(loc, `source_${source}` as Key) : source;
     }
-    if ((event.kind === "model_apply" || event.kind === "model_rollback") && typeof d.model_version === "number") {
+    if (["model_apply", "model_rollback", "model_reset"].includes(event.kind) && typeof d.model_version === "number") {
       return th(loc, "version", { n: d.model_version });
     }
     if (event.kind === "session_start" && d.name) {

@@ -6,10 +6,11 @@ from pathlib import Path
 import pytest
 
 from engine import Engine, recording, to_json
-from engine.core import Options
+from engine.core import Derived, Options
 from engine.defaults import A_ON_START
 from engine.learn import NONE, Learner, TickRecord
 from engine.model import Model
+from engine.model import from_json as model_from_json
 from engine.model import to_json as model_json
 from engine.topology import build
 from engine.types import (
@@ -18,6 +19,7 @@ from engine.types import (
     Frame,
     GlobalSettings,
     Header,
+    HouseEmpty,
     Json,
     Label,
     LightEvent,
@@ -32,7 +34,7 @@ from engine.types import (
     RoomSettings,
     Settings,
 )
-from tests.engine.helpers import B1, B2, B3, B4, FLAT3, TWO, all_levels, obs
+from tests.engine.helpers import B1, B2, B3, B4, FLAT3, H0, TWO, WIDE, all_levels, obs
 from tools import synth
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "recordings"
@@ -184,6 +186,57 @@ def test_background_learning_waits_for_apply() -> None:
         engine.discard("p-0002-0001")
     again.discard(pid)
     assert again.pending_id() is None
+
+
+def test_an_empty_house_is_learned_once_when_a_label_repeats_it() -> None:
+    records = list(synth.simulate_physics("flat2", 3, 1300.0, empty=1200.0, persons=1))
+    header = records[0]
+    assert isinstance(header, Header)
+    assert header.plan is not None
+    engine = Engine(header.plan, Settings(global_=GlobalSettings(mode="rules", learning=True)))
+    _drive(engine, tuple(records[1:]), synth.START + 1250)
+    online = engine.model_state()["pending"]
+    assert isinstance(online, dict)
+    seconds = online["empty_s"]
+    assert isinstance(seconds, float)
+    assert seconds == pytest.approx(1200 - 2 * 120, abs=1)
+    assert online["labels"] == {"empty_house": round(seconds / 0.5)}
+    engine.label(Label(t0=synth.START, t1=synth.START + 1200, kind="empty", source="empty_house"))
+    engine.advance(synth.START + 1250.5)
+    after = engine.model_state()["pending"]
+    assert isinstance(after, dict)
+    assert after["empty_s"] == (1200 - 2 * 3) + 0.5
+    assert after["labels"] == {"empty_house": (1200 - 2 * 3) * 2 + 1}
+
+
+def test_a_plan_change_while_the_house_is_empty_restarts_the_run() -> None:
+    records = list(synth.simulate_physics("flat2", 3, 600.0, empty=600.0, persons=1))
+    header = records[0]
+    assert isinstance(header, Header)
+    assert header.plan is not None
+    engine = Engine(header.plan, Settings(global_=GlobalSettings(mode="rules", learning=True)))
+    t = _drive(engine, tuple(records[1:]), synth.START + 400)
+    smaller = replace(header.plan, bulbs=header.plan.bulbs[:-1])
+    cut = Engine(smaller, engine._settings, engine.model_state()).inherit(engine)
+    cut.advance(t + 0.5)
+    assert cut._empty_run == 1
+    same = Engine(header.plan, engine._settings, engine.model_state()).inherit(engine)
+    assert same._empty_run == engine._empty_run
+
+
+def test_rules_mode_leaves_a_bulb_nobody_hears_out_of_the_fan() -> None:
+    plan = WIDE
+    hall = [b.ieee for b in plan.bulbs if b.ieee != H0]
+    engine = Engine(plan, Settings())
+    heard = dict.fromkeys((*hall[:3], H0), 5)
+    moving = {hall[0]: {hall[1], H0}, hall[1]: {hall[0], H0}, hall[2]: {H0}, H0: set(hall[:3])}
+    for rx, txs in moving.items():
+        engine.observe(obs(1.0, rx, {b: v for b, v in heard.items() if b != rx}, motion=frozenset(txs)))
+    engine.advance(1.0)
+    assert {r: on for r, (_, on, _) in engine.rooms_now().items()} == {"hall": True, "office": True}
+    engine.context(Context(t=1.2, offline=frozenset({hall[2]})))
+    engine.advance(1.5)
+    assert {r: on for r, (_, on, _) in engine.rooms_now().items()} == {"hall": True, "office": False}
 
 
 def test_soft_empty_quiet_background_and_disabled_learning() -> None:
@@ -632,14 +685,21 @@ def test_a_removed_room_leaves_the_proposal_and_the_active_model() -> None:
     engine = Engine(plan, _settings(), {"active": pending, "pending": pending, "pending_seq": 3})
     fresh = Engine.successor(engine.carry(), _without_room(plan, "hall"), _settings())
     assert fresh.foreign_rooms() == {"hall"}
-    edited = fresh.inherit(engine)
+    version = engine.model_state()["model_version"]
+    assert isinstance(version, int)
+    edited = fresh.inherit(engine, 50.0)
     assert edited.foreign_rooms() == frozenset()
     state = edited.model_state()
+    assert state["model_version"] == edited.summary()["model_version"] == version + 1
+    assert edited.summary()["updated"] == 50.0
+    same = Engine.successor(engine.carry(), plan, _settings()).inherit(engine, 60.0)
+    assert same.model_state()["model_version"] == version
     active, kept = state["active"], state["pending"]
     assert isinstance(active, dict)
     assert isinstance(kept, dict)
     assert _room_keys(active) == _room_keys(kept) == {"bed"}
-    assert edited.pending_id() == engine.pending_id() == "p-0001-0003"
+    assert engine.pending_id() == "p-0001-0003"
+    assert edited.pending_id() == "p-0002-0003"
     readded = Engine.successor(edited.carry(), plan, _settings())
     assert readded.foreign_rooms() == frozenset()
 
@@ -651,3 +711,268 @@ def test_a_proposal_with_background_learning_stays_after_a_room_removal() -> Non
     assert edited.pending_id() is not None
     stored = Engine(plan, _settings(), engine.model_state())
     assert Engine.successor(stored.carry(), _without_room(plan, "hall"), _settings()).inherit(stored).pending_id()
+
+
+def test_a_model_copy_serialises_later_as_it_was() -> None:
+    plan, everything = _synthetic()
+    records = tuple(r for r in everything if not isinstance(r, Context))
+    engine = Engine(plan, _settings())
+    t = _drive(engine, records, synth.START + 30)
+    engine.label(Label(t0=t - 20, t1=t - 5, kind="empty", source="wizard"))
+    assert engine.pending_id() is not None
+    copy = engine.model_copy()
+    before = engine.model_state()
+    assert copy.state() == before
+    assert copy.active_state() == {"active": before["active"]}
+    carry = engine.carry()
+    for i in range(4):
+        engine.advance(t + 0.5 * (i + 1))
+    engine.apply(engine.pending_id() or "", t + 3)
+    assert copy.state() == before
+    assert model_json(carry.active) == before["active"]
+    assert engine.model_state() != before
+    assert Engine(plan, _settings()).model_copy().state()["pending"] is None
+
+
+def _learning() -> tuple[Plan, Engine, float]:
+    plan, everything = _synthetic()
+    engine = Engine(plan, _settings(learning=True))
+    t = _drive(engine, everything, synth.START + 280)
+    assert engine.pending_id() is not None
+    return plan, engine, t
+
+
+def _loaded(engine: Engine) -> tuple[object, ...]:
+    return (engine._params, engine._emission._cols, engine._coverage, engine._pair_weight, engine._cfar._basis)
+
+
+def _derived(ready: Derived) -> tuple[object, ...]:
+    return (ready.params, ready.emission._cols, ready.coverage, ready.pair_weight, ready.cfar)
+
+
+def _weaken(engine: Engine, t: float) -> None:
+    rx, tx = engine.topology.bulbs[:2]
+    engine.observe(obs(t, rx, {tx: 5}, signal=-95))
+
+
+def test_an_apply_takes_the_derivation_made_off_the_loop_while_the_proposal_is_unchanged() -> None:
+    _plan, engine, t = _learning()
+    pending = engine.pending_model()
+    assert pending is not None
+    ready = engine.derive(pending, engine.weak_pairs())
+    assert engine.pending_fits(ready)
+    engine.apply(engine.pending_id() or "", t, ready)
+    assert not engine.pending_fits(ready)
+    assert engine._emission is ready.emission
+    assert engine._cfar._basis is ready.cfar
+    assert _loaded(engine) == _derived(engine.derive(engine._active, engine.weak_pairs()))
+
+
+def test_an_apply_derives_again_when_the_proposal_learned_meanwhile() -> None:
+    _plan, engine, t = _learning()
+    pending = engine.pending_model()
+    assert pending is not None
+    ready = engine.derive(pending, engine.weak_pairs())
+    engine.advance(t + 0.5)
+    assert not engine.pending_fits(ready)
+    engine.apply(engine.pending_id() or "", t + 0.5, ready)
+    assert engine._emission is not ready.emission
+    assert _loaded(engine) == _derived(engine.derive(engine._active, engine.weak_pairs()))
+
+
+def _ticks(engine: Engine, t: float, count: int) -> None:
+    for i in range(count):
+        engine.advance(t + 0.5 * (i + 1))
+
+
+def test_background_learning_held_during_a_derivation_lands_when_released() -> None:
+    _plan, held, t = _learning()
+    _plan, free, _t = _learning()
+    before = held.model_state()
+    held.hold_background()
+    held.hold_background()
+    _ticks(held, t, 6)
+    _ticks(free, t, 6)
+    assert held.model_state() == before
+    assert free.model_state() != before
+    held.release_background()
+    assert held.model_state() == free.model_state()
+    held.release_background()
+    _ticks(held, t + 3, 2)
+    _ticks(free, t + 3, 2)
+    assert held.model_state() == free.model_state()
+
+
+def test_an_apply_while_background_learning_is_held_takes_its_derivation_at_once() -> None:
+    _plan, engine, t = _learning()
+    pending = engine.pending_model()
+    assert pending is not None
+    engine.hold_background()
+    ready = engine.derive(pending, engine.weak_pairs())
+    _ticks(engine, t, 6)
+    assert engine.pending_fits(ready)
+    engine.apply(engine.pending_id() or "", t + 3, ready)
+    assert engine._emission is ready.emission
+    assert engine.pending_id() is None
+    engine.release_background()
+    learned = engine.pending_model()
+    assert learned is not None
+    assert engine.pending_id() == "p-0002-0002"
+    assert learned.bg_ticks == pytest.approx(engine._active.bg_ticks + 6)
+
+
+def test_a_promotion_derives_again_when_a_link_turned_weak_meanwhile() -> None:
+    _plan, engine, t = _learning()
+    state = engine.model_state()["active"]
+    assert isinstance(state, dict)
+    ready = engine.derive(engine.reset_model(), engine.weak_pairs())
+    _weaken(engine, t)
+    assert engine.weak_pairs() != ready.weak
+    engine.reset(t, None, ready)
+    assert engine._emission is not ready.emission
+    assert engine._params == engine.derive(Model(), engine.weak_pairs()).params
+
+
+def test_a_restore_and_resets_take_their_derivations() -> None:
+    plan, engine, t = _learning()
+    pid = engine.pending_id() or ""
+    engine.apply(pid, t)
+    state = engine.model_state()["active"]
+    assert isinstance(state, dict)
+    room = plan.rooms[0].id
+    ready = engine.derive(engine.reset_model(room), engine.weak_pairs())
+    assert engine.reset(t, room, ready) == 2
+    assert engine._emission is ready.emission
+    ready = engine.derive_state(state, engine.weak_pairs())
+    assert engine.restore(state, t, ready) == 3
+    assert engine._active is ready.model
+    assert engine._emission is ready.emission
+    ready = engine.derive(engine.reset_model(), engine.weak_pairs())
+    assert engine.reset(t, None, ready) == 4
+    assert engine._emission is ready.emission
+    assert engine.model_state()["active"] == model_json(replace(Model(), version=4, updated=t))
+
+
+def test_a_restore_loads_its_own_model_when_handed_a_derivation_of_another() -> None:
+    _plan, engine, t = _learning()
+    engine.apply(engine.pending_id() or "", t)
+    state = engine.model_state()["active"]
+    assert isinstance(state, dict)
+    other = engine.derive_state(model_json(Model()), engine.weak_pairs())
+    assert engine.restore(state, t, other) == 2
+    assert engine._active is not other.model
+    assert engine._emission is not other.emission
+    assert engine.model_state()["active"] == {**state, "model_version": 2}
+    assert _loaded(engine) == _derived(engine.derive(model_from_json(state), engine.weak_pairs()))
+    stale = engine.derive(model_from_json(state), engine.weak_pairs())
+    assert engine.restore(state, t, stale) == 3
+    assert engine._active is not stale.model
+    assert engine._emission is stale.emission
+
+
+def test_a_derivation_fits_only_the_topology_it_was_made_for() -> None:
+    plan, engine, t = _learning()
+    pending = engine.pending_model()
+    assert pending is not None
+    ready = engine.derive(pending, engine.weak_pairs())
+    twin = Engine(plan, _settings(learning=True), engine.model_state())
+    assert twin.topology == engine.topology
+    assert twin.weak_pairs() == ready.weak
+    assert twin._pending == ready.model
+    assert engine.pending_fits(ready)
+    assert not twin.pending_fits(ready)
+    twin.apply(twin.pending_id() or "", t, ready)
+    assert twin._emission is not ready.emission
+    assert _loaded(twin) == _derived(twin.derive(twin._active, twin.weak_pairs()))
+
+
+def test_a_successor_derives_its_cleaned_model_off_the_loop() -> None:
+    plan, learned, _t = _learned(("hall", "bed"))
+    pending = learned.model_state()["pending"]
+    engine = Engine(plan, _settings(), {"active": pending, "pending": pending, "pending_seq": 3})
+    smaller = _without_room(plan, "hall")
+    fresh = Engine.successor(engine.carry(), smaller, _settings())
+    staged = fresh._staged
+    assert staged is not None
+    edited = fresh.inherit(engine, 50.0)
+    assert edited._emission is staged.emission
+    assert edited._staged is None
+    assert _loaded(edited) == _derived(edited.derive(edited._active, edited.weak_pairs()))
+    assert Engine.successor(engine.carry(), plan, _settings())._staged is None
+
+
+def test_a_successor_derives_again_when_a_link_turned_weak_during_the_rebuild() -> None:
+    plan, learned, t = _learned(("hall", "bed"))
+    pending = learned.model_state()["pending"]
+    engine = Engine(plan, _settings(), {"active": pending, "pending": pending, "pending_seq": 3})
+    fresh = Engine.successor(engine.carry(), _without_room(plan, "hall"), _settings())
+    _weaken(engine, t)
+    staged = fresh._staged
+    assert staged is not None
+    edited = fresh.inherit(engine, 50.0)
+    assert edited._emission is not staged.emission
+    assert edited.weak_pairs() != staged.weak
+    assert _loaded(edited) == _derived(edited.derive(edited._active, edited.weak_pairs()))
+
+
+def _house(engine: Engine, start: float, until: float, house: HouseEmpty, tick: float = 0.5) -> float:
+    t = start
+    engine.context(Context(t=t, house_empty=house))
+    while t <= until:
+        engine.advance(t)
+        t += tick
+    return t
+
+
+def _rules(learning: bool, tick_s: float = 0.5) -> Settings:
+    return Settings(global_=GlobalSettings(mode="rules", learning=learning, tick_s=tick_s))
+
+
+def test_learning_switched_back_on_waits_for_a_fresh_run_of_empty_ticks() -> None:
+    plan, _records = _synthetic()
+    engine = Engine(plan, _rules(True))
+    t = _house(engine, 0.0, 400.0, "yes")
+    engine.reconfigure(_rules(False))
+    t = _house(engine, t, 600.0, "no")
+    t = _house(engine, t, 900.0, "unknown")
+    t = _house(engine, t, 960.0, "yes")
+    before = _pending_labels(engine)
+    engine.reconfigure(_rules(True))
+    t = _house(engine, t, 1000.0, "yes")
+    assert _pending_labels(engine) == before
+    _house(engine, t, 1300.0, "yes")
+    later = [r.t for r in engine._learner.buffer if r.taught and r.t > 400.0]
+    assert later
+    assert min(later) > 960.0
+
+
+def test_a_shorter_tick_during_an_absence_teaches_no_tick_twice() -> None:
+    plan, _records = _synthetic()
+    engine = Engine(plan, _rules(True, 1.0))
+    t = _house(engine, 0.0, 600.0, "yes", 1.0)
+    taught = _pending_labels(engine)
+    assert isinstance(taught, dict)
+    engine.reconfigure(_rules(True, 0.5))
+    _house(engine, t, t + 20.0, "yes", 0.5)
+    after = _pending_labels(engine)
+    assert after == taught
+
+
+def test_the_empty_house_apply_would_give_counts_queued_labels_on_top_of_what_was_learned() -> None:
+    plan, _records = _synthetic()
+    engine = Engine(plan, _rules(True))
+    t = _house(engine, 0.0, 1200.0, "soft")
+    engine.context(Context(t=t, house_empty="no"))
+    soft = engine.model_state()["pending"]
+    assert isinstance(soft, dict)
+    assert engine.applied_empty_s() == pytest.approx(soft["empty_s"])
+    engine.label(Label(t0=0.0, t1=1200.0, kind="empty", source="wizard"))
+    preview = engine.applied_empty_s()
+    assert engine.model_state()["pending"] == soft
+    engine.advance(t)
+    after = engine.model_state()["pending"]
+    assert isinstance(after, dict)
+    assert preview == pytest.approx(after["empty_s"])
+    assert preview == pytest.approx(1200 - 2 * 3 + 0.5, abs=0.01)
+    fresh = Engine(plan, _rules(False))
+    assert fresh.applied_empty_s() == 0.0

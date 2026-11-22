@@ -119,7 +119,8 @@ The generated table in the README lists them; in short:
   `motion` (without the hold), `probability`, `last_motion`, `top_pairs` (up to 3, bulb names), `coverage`
   (`good`/`weak`/`none`), `model_version`. With `coverage = none` the entity is unavailable rather than wrong.
 - `binary_sensor.outglow_home_motion`, `sensor.outglow_motion_room` (with `rooms`, `trail` and, with exactly one
-  person at home, `likely_person`), diagnostic `sensor.outglow_status`, per-room
+  person at home, `likely_person`), diagnostic `sensor.outglow_status` (`learning` / `ready` / `degraded` / `paused` /
+  `plan_too_large`, the last while the stored plan is over the limits of 4.1), per-room
   `sensor.outglow_room_<room>_false_alarms_24h`, config switches `sensing` and `learning`, per-room
   `select` false alarm budget and reaction, `number` hold time, and a button to delete the motion history.
 
@@ -127,7 +128,9 @@ There are **no entities per line** (30 bulbs would make over 400). Lines are in 
 Attributes that change every tick (`probability`, `top_pairs`, `rooms`, gate counts…) are written at most once per
 60 s (status: 300 s) unless the state or a steady attribute changes, and the noisy ones are excluded from the
 recorder. `home_motion` turns off 10 s after the last motion; `motion_room` moves to another room at once when the
-current one stops being occupied or when the new one has motion and the current one had none for 10 s.
+current one stops being occupied or when the new one has motion and the current one had none for 10 s. A tie (in
+`rules` every lit room has p = 1) goes to the room shown, then to the room whose motion started last, never to the
+order or the ids of the rooms.
 
 ### 3.5 Actions
 
@@ -137,9 +140,15 @@ current one stops being occupied or when the new one has motion and the current 
 
 ### 3.6 Context: phones, people, lights
 
-- **Empty home**: every chosen `person.*` is `not_home` for ≥ 600 s. The interval minus 120 s at both ends becomes an
-  "empty" label for every room and background for CFAR. "Others may be home (pets, guests)" turns it into a weak label.
-  Off by default (D6).
+- **Empty home**: every chosen `person.*` is `not_home` for ≥ 600 s. It is learnt **online and once**: each tick of
+  the absence goes to the CFAR and pair backgrounds 120 s late, and coming home ends the learning before the last
+  120 s are reached, so no label is added afterwards for the same interval (the raw data minus the margins still go to
+  the night calibration). Learning online matters because a label after the fact reaches only the 3 h tick buffer. Each
+  tick remembers the weight it was taught with; a later empty label (a wizard step, a recording) adds only the
+  difference, so overlapping sources never count twice. The run counts only while learning is on, and after learning
+  is switched back on it waits for a fresh 2 × 120 s. "Others may be home (pets, guests)" turns it into a weak label:
+  it does not force rooms off, counts no false alarms and teaches only CFAR, with weight 0.3. The empty time in the
+  model fades with the background (half-life 7 days). Off by default (D6).
 - **Who is home**: with exactly one person home, `sensor.outglow_motion_room` gets `likely_person`. No more
   identification than that.
 - **Light changes**: `state_changed` of the bulbs' `light.*` entities, with their context: `context.user_id` means a
@@ -177,12 +186,37 @@ A write to a bulb is two steps: `outglow/bulb/write_preview` returns the effects
 Options: log level. The base topic is fixed per entry; everything else (tick, people, retention, learning) is in the
 panel's settings (`Settings.global`, one source for the engine and the panel). Repairs: missing converter, `output:
 attribute`, a sensing bulb without activity reports for a day, bridge offline, plan missing or incomplete, a room
-without coverage, recommendations from 5.9, rates not restored after a session.
+without coverage, recommendations from 5.9, rates not restored after a session (or still waiting for Zigbee2MQTT to
+confirm them), and two about the stored plan:
+
+- **Plan too large** (`plan_too_large`): a plan stored before the current limits of 4.1. The integration keeps it but
+  every engine (live, the replay of `history/frames`, the session summary) is built from an empty plan, learning and
+  the night calibration wait (labels go to the history as rejected; the model, the proposal and the last calibration
+  do not change), the home entities are unavailable and the status is `plan_too_large`. The repair names the limit
+  until the plan is simplified.
+- **Unreadable plan** (`plan_unreadable`): `outglow.plan` does not decode, or Home Assistant set it aside after a
+  syntax error. Outglow runs with an empty plan, leaves the room entities and devices alone and keeps a copy as
+  `outglow.plan.corrupt-<time>` (one per content, at most three, removed with the integration). The repair offers
+  *Restore* (reads the fixed copy and saves it as the plan) and *Discard the old plan*. The recovery state survives
+  restarts and ends only with a restore, a discard or the first saved plan with rooms (a save without rooms, such as
+  only excluding a direction, does not end it). When it ends, the old rooms not in the new plan (known from the
+  entity and device registries, settings, the model and the history) go to `retired_rooms` and are cleaned up; until
+  then `plan/get` lists them in `reserved_rooms`, so the editor does not give their ids to a new room.
 
 ### 3.10 Performance
 
 About 3–4 messages/s at 9 bulbs, up to about 15/s at 30. A tick of 0.5 s costs O(S·P) with S ≤ 299 states and
 P ≤ 100 pairs, a few ms in CPython; budget p99 ≤ 10 ms at 9 bulbs and ≤ 50 ms at 30. The engine does not need numpy.
+
+On Home Assistant's event loop, at 30 bulbs with a learnt model, a tick takes < 5 ms on average and no call on the
+loop takes > 20 ms of CPU (`tests/integration/test_loop_time.py` measures the CPU time of the loop thread per call;
+`OUTGLOW_LOOP_TIME_SCALE` multiplies both budgets on a slow or busy machine). The median, MAD and threshold of each
+direction are computed once per loaded model; the CFAR refresh every 60 s only picks thresholds for directions
+without samples from their signal class's pool. Deriving the model (pair parameters, emission tables, CFAR thresholds)
+at start, on a plan save, apply, rollback and reset runs in the executor on a copy; the engine takes the result if the
+topology, the model and the weak lines did not change meanwhile, and derives again otherwise. While an apply derives,
+the proposal's background learning (empty and quiet home) is held and goes to the model right after the apply. The
+learnt model is serialised off the loop too.
 
 ## 4. Data model
 
@@ -206,7 +240,17 @@ Metres, x to the right, y down, one floor (`floor_id` reserved).
 ```
 
 - Walls come from the room edges (a shared edge is a partition wall); the user sets their kind and the doors. The wall
-  kind changes the prior and the recommendations.
+  kind changes the prior and the recommendations. A room inside another (a pantry, an island) has its walls with the
+  outer room along its own edges inside it, not on the shared outer outline; a piece of an outer wall it leans on is
+  shared with the room behind that wall (the smallest room next to the wall decides each side). Doors go on these
+  walls like on any other. Without `adjacent` in the plan, the engine counts a room directly inside another as its
+  neighbour, like rooms whose walls touch.
+- **Overlap and nesting.** Rooms that share only part of their floor (crossing edges, or a corner or the middle of an
+  edge strictly inside the other room) get the warning `overlapping_rooms`. A room wholly inside another (touching its
+  edge or equal to it too) is nested and allowed without a warning; a point then belongs to the smaller room. The
+  editor, the plan import and the prototype import use the same geometry (`engine.topology.outlines_overlap`), with
+  one tolerance of 1 mm from a line, so a corner snapped to a slanted wall lies on it. An L-shaped room does not
+  overlap a room in its corner.
 - A bulb's room follows from its position; the user may pin it to another room (a bulb above a door). The editor never
   pins by itself; a pinned bulb standing in another room is flagged (`bulb_pinned_elsewhere`). In nested rooms a bulb
   belongs to the smallest.
@@ -220,8 +264,29 @@ Metres, x to the right, y down, one floor (`floor_id` reserved).
   (≥ 0.4 m; ≥ 1.5 m is an opening); at most 200 corners per room; the floor becomes an SVG background (≤ 10 MB). The
   whole read has a 5 s CPU budget. With `current` (the editor's plan, *Keep the bulbs*), matched rooms keep their
   ids and settings and the bulbs move with a rigid transform fitted to the matched rooms' centres (a reflection only
-  with ≥ 3 rooms not in a line and a clearly better fit).
-- **Background**: saved under a content-hashed name together with the plan; the previous one is kept for one undo.
+  with ≥ 3 rooms not in a line and a clearly better fit). The bulbs move only from 3 matched rooms on: with 1–2 they
+  stay where they are with `bulbs_not_aligned`, because two centres fix the rotation by the line between them alone,
+  with a near-zero error whether the match is right or not.
+- **Limits.** Only a Valetudo map may be up to 16 MiB of text (also as `deflated_base64`); an Outglow plan, YAML and
+  the prototype layout at most 512 KiB; larger is `invalid_format` with the size. A plan (imported, or saved with
+  `plan/save`) has at most 40 rooms, 2000 room corners, 2000 walls and doors and 100 bulbs, and the estimated cost of
+  rebuilding the engine with the learnt model (`engine_cost`: pairs × room states, pairs × corners, pairs × rooms,
+  pairs × walls and × hard walls, a constant per pair, corner pairs without an adjacency list) must stay within 2 s of
+  CPU on a laptop (`ENGINE_BUDGET_US`); about 4× longer on a Raspberry Pi, in the executor. Over it the error says how
+  many bulbs fit with these rooms (four corners each, with adjacency, no walls: 40 rooms 23, 30 rooms 33, 20 rooms 55,
+  16 rooms 70, 12 rooms 89, 8 rooms and fewer 100). The `current` plan of an import, used only to keep bulbs, has
+  the old wider limits (250 rooms, 50 000 corners, 50 000 walls, 500 bulbs), so a plan stored before the limits can be
+  replaced by an import. The import's checks and bulb matching have a 2 s CPU budget (`CHECK_BUDGET_S`), after which
+  the import is `invalid_format` ("too complex"). A deflate stream must be complete with nothing after it, for the
+  background image and the map from MQTT or HTTP too.
+- **Background**: `plan/save` with `background_image` stores the image as `plan-<sha256:16>.<ext>` (a temporary
+  `.plan-*.part` file in the same folder, then a rename) and the plan points to it. A Valetudo import names its
+  background the same way at once, so the panel caches images by file name. Background writes are serialised under
+  one lock. The files of the current and the previous save are kept (one undo of an import); older ones are deleted.
+  A plan pointing to a file that is gone saves without a background (`background: null`; the panel says the
+  background of that version is lost). The panel never re-sends an image the server already has. The editor and
+  *Live* draw the saved background under the rooms (position, scale, opacity; no rotation); in the dark theme only an
+  SVG drawing (a Valetudo map) is inverted, not a photo.
 
 ### 4.2 Engine types
 
@@ -281,7 +346,12 @@ Per direction d = (rx ← tx):
 4. **Frozen lines.** Identical level in 8 reports while another direction of the same rx changed: `frozen`, no data.
    `signal_dbm` ≤ −88: `weak`, half weight in the priors.
 5. **Excluded directions** from the plan give no data.
-6. **Per tick** (0.5 s by default): the maximum level of the tick; without a report the last level holds for ≤ 1 s.
+6. **A bulb with its own CFAR detector.** Firmware 1.0.6 can switch a bulb's detector to CFAR (`motion_detector` in
+   Zigbee2MQTT). Its activity and noise then mean something else, so the integration drops them and the directions
+   that bulb receives have no data: neither the host CFAR nor the model learns from them, not even as censored quiet.
+   Motion bits and signal stay. The context carries the set of such bulbs, so recordings and replays keep it. A
+   missing field keeps the rule behaviour of older firmware.
+7. **Per tick** (0.5 s by default): the maximum level of the tick; without a report the last level holds for ≤ 1 s.
 
 ### 5.2 Layer 1: CFAR on the host
 
@@ -380,7 +450,12 @@ day, entry detection and delay from labels, **coverage** = Σ_p I_{p,r} (`good` 
 nat), vetoes. Recommendations, each with its numbers: skip a noisy direction (a change in the plan, not the bulb);
 raise the sensitivity of a nearly deaf bulb (a confirmed write that clears its calibration: *a sensitive gate, the
 decision on the host*); a weakly covered room, with candidate places for another bulb scored by the coverage it would
-add; more empty-home time; a frozen line; a room without bulbs.
+add; more empty-home time; a frozen line; a room without bulbs; and, in `rules` mode, **a room with one bulb** next to
+a room with at least two (`one_bulb`): it lights while a neighbour has motion only when its full fan of lines moves
+(8.3), so the recommendation marks up to three spots for a second bulb or node. Spots are grid points 0.5 m apart and
+at least 0.5 m from the walls (as far as a narrow room allows), scored by 10 × the length of the new pair inside the
+room plus the mean in-room length of its lines to the other bulbs with a predicted RSSI ≥ −80 dBm, at least 1 m apart.
+The pair inside the room is what the room lacks, so it decides; the lines to neighbours only break ties.
 
 ### 5.10 Defaults
 
@@ -446,9 +521,24 @@ buttons, vibration and optional speech on a new step. Label time is the server's
   lines, a pulse along a line when it starts exceeding, the trail as arcs through doors (never invented
   coordinates), the heat layer labelled as an illustration.
 - **Plan**: rectangle and polygon, snapping to the grid, corners and edges of other rooms and to 90°, resize handles,
-  shared walls moving in both rooms, doors on walls, bulbs dragged from the list, background picture with two-point
-  scale, import with a preview, live validation, undo/redo, a warning when leaving with unsaved changes, saving with
-  `rev`.
+  shared walls moving in both rooms (doors keep their width and do not run into one another), corners added by a
+  double-click on a wall and removed with Delete or a double-click (a corner that must stay says why: three corners
+  at least, no self-crossing outline, no overlap with another room), corners and walls picked from the keyboard,
+  merging the two rooms of a wall into one (refused, with the reason, for rooms that overlap or nest; the panel says
+  what goes with the removed room and what happens to the areas), nested rooms, doors on walls, bulbs dragged from the
+  list, the saved background under the rooms with a toggle, import with a preview, live validation, undo/redo, a
+  warning when leaving with unsaved changes, saving with `rev`. The editor never sends a plan that brings back a
+  removed room's id.
+- **Drafts**: each editor keeps its own draft in `localStorage` under `outglow.editor.draft.<entry>.<tab>.<editor>`
+  (the tab id is in `sessionStorage`); a background from an import goes to IndexedDB. Home Assistant detaches a hidden
+  panel after 5 minutes and rebuilds it with the plan from the server; the new editor (or a reloaded page) then offers
+  *Restore* / *Discard* for the drafts of this tab and of closed tabs (an open tab refreshes
+  `outglow.editor.alive.<tab>` every 30 s and counts as closed after 3 minutes of silence), noting when the server's
+  plan changed meanwhile. A duplicated tab takes a tab id of its own. Drafts older than 7 days go. After a reconnect
+  the panel fetches the plan again (retrying for a while after a Home Assistant restart): without unsaved edits it is
+  replaced, with them they stay, and a changed plan on the server shows the conflict bar (*Load theirs* / *Keep
+  mine*). A save whose reply was lost with the connection is recognised afterwards as one's own (the server's plan has
+  `rev` one higher and is the plan that was sent), so it shows no conflict.
 - **Learning**: section 6.3. **Quality**: section 5.9. **Settings**: per-room budget, reaction and hold; global
   switches, people, retention, snapshots, and the bulbs' motion settings, changed only through the confirmation dialog
   (section 9). **History**: room bands from the ticks, events, replay from raw data up to 48 h back, corrections.
@@ -479,7 +569,13 @@ training fold; bootstrap confidence intervals. Metrics: false switch-ons per hou
 
 B0: the bulbs' own occupancy. B1: the zone rule (`engine/rules.py`, the `rules` mode): a room with its own pair in
 motion (both ends inside) switches on and takes its pairs shared with neighbours; a room without such a pair switches on
-with pairs no such room took; a room without bulbs never switches on in this mode. B3: the full pipeline, with
+with pairs no such room took; a room without bulbs never switches on in this mode. A room with one bulb has no inner
+pair, so it stays dark while a neighbour with its own pair explains all its lines, unless a **full fan** moves: all
+(at least `FAN_MIN` = 3) of its lines into one neighbouring room that the rule uses and that deliver data, or all (at
+least 3) of its lines into every neighbour lit by its own pair (a **joint fan**). A pair is in the fan when one of its
+directions is used; skipped directions and directions without data do not block it. Looser variants (a single-bulb
+room always keeping its lines, or 2 of 3 lines) gave clearly more false switch-ons and were rejected; the remedy is a
+second bulb (the `one_bulb` recommendation, 5.9). B3: the full pipeline, with
 ablations (no direction agreement, no veto, no explaining away, no learning, no CFAR, a flat prior). If B3 does not
 beat B1 on false alarms and entry detection, `rules` stays the default (it is today) and `bayes` an option.
 
@@ -523,15 +619,18 @@ experimental.
   admin-only access, the **no-writes** test (section 9), restoring raised report rates, store migrations, SQLite
   retention, diagnostics redaction, recorder load.
 - **Frontend**: vitest for logic (editor geometry, snapping, import, frame deltas), Playwright on the demo panel
-  (themes, 390/768/1440 px, wizard end to end, editor, keyboard and touch in Chrome and WebKit), and the README
-  pictures compared with a pixel tolerance.
+  (themes, 390/768/1440 px, wizard end to end, editor, corners, merging, drafts and reconnects, keyboard and touch in
+  Chrome and WebKit), and the README pictures compared with a pixel tolerance.
+- **Loop time** (`tests/integration/test_loop_time.py`): the event loop budgets of 3.10.
+- `make quick` runs only the checks and tests the changes since a base reach; `make check` runs everything.
 
 ## 12. Requests to the firmware and the converter
 
 1. Converter: separate the `0xFF47` level from the `0x0002` window sum (removes the stream heuristic, D2).
 2. Firmware: an "always stream" mode, so the host gets an unbiased background (D3).
 3. Firmware: the number of samples behind each window, so a frozen line is a fact, not a guess.
-4. Later: the firmware's own CFAR decisions as an extra observation.
+4. The firmware's own CFAR detector (firmware 1.0.6, `motion_detector`) exists; for now its line data are skipped
+   (5.1). Later: its decisions as an extra observation.
 
 ## 14. Decisions
 

@@ -5,6 +5,7 @@ import { boxOf, bulbRoom, contains, distanceToBoundary, labelPoint, planBox, tra
 import { approach, blobSources, fillHeat, heatGrid, pairSources, type HeatGrid } from "./heat";
 import { strings, type Loc } from "./i18n";
 import { tokens } from "./theme";
+import { Backdrop, backdrop } from "./background";
 
 const t = strings(
   {
@@ -34,9 +35,10 @@ export interface Layers {
   trail: boolean;
   heat: boolean;
   bulbNames: boolean;
+  background?: boolean;
 }
 
-export const DEFAULT_LAYERS: Layers = { lines: true, trail: true, heat: true, bulbNames: false };
+export const DEFAULT_LAYERS: Layers = { lines: true, trail: true, heat: true, bulbNames: false, background: true };
 
 export function pairKey(a: string, b: string): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
@@ -103,7 +105,6 @@ export class OutglowPlanView extends LitElement {
     maxHeight: { attribute: "max-height" },
     background: { attribute: false },
     _size: { state: true },
-    _backgroundSize: { state: true },
   };
 
   declare plan: Plan | null;
@@ -125,7 +126,6 @@ export class OutglowPlanView extends LitElement {
   declare maxHeight: string;
   declare background: string | null;
   declare _size: [number, number];
-  declare _backgroundSize: [number, number] | null;
 
   private _observer: ResizeObserver | null = null;
   private _raf = 0;
@@ -139,6 +139,7 @@ export class OutglowPlanView extends LitElement {
   private _colours: Colours | null = null;
   private _prevStates = new Map<string, DirectionFrame["state"]>();
   private _box: Box = [0, 0, 1, 1];
+  private _backdrop = new Backdrop(this);
 
   constructor() {
     super();
@@ -161,7 +162,6 @@ export class OutglowPlanView extends LitElement {
     this.maxHeight = "70vh";
     this.background = null;
     this._size = [0, 0];
-    this._backgroundSize = null;
   }
 
   static override styles = [
@@ -190,6 +190,9 @@ export class OutglowPlanView extends LitElement {
       }
       canvas {
         pointer-events: none;
+      }
+      .backdrop.dark {
+        filter: invert(1) hue-rotate(180deg);
       }
       .outline {
         fill: none;
@@ -432,24 +435,8 @@ export class OutglowPlanView extends LitElement {
       this._colours = null;
     }
     if (changed.has("background")) {
-      this._backgroundSize = null;
-      const url = this.background;
-      if (url) {
-        const image = new Image();
-        image.onload = () => {
-          if (this.background === url) this._backgroundSize = [image.naturalWidth, image.naturalHeight];
-        };
-        image.src = url;
-      }
+      this._backdrop.show(this.background ? { url: this.background } : null);
     }
-  }
-
-  private _backdrop() {
-    const placed = this.plan?.background;
-    const size = this._backgroundSize;
-    if (!this.background || !placed || !size) return nothing;
-    return svg`<image class="backdrop" href=${this.background} x=${placed.x} y=${placed.y} width=${size[0] * placed.m_per_px}
-      height=${size[1] * placed.m_per_px} opacity=${placed.opacity} preserveAspectRatio="none"></image>`;
   }
 
   override updated(): void {
@@ -722,7 +709,7 @@ export class OutglowPlanView extends LitElement {
     const rooms = this._visibleRooms();
     const doorWidth = (kind: WallKind): number => WALL_PX[kind] + 3;
     return svg`
-      ${this._backdrop()}
+      ${backdrop(this._backdrop.url, this._backdrop.size, this.plan?.background, this.dark)}
       ${rooms.map((room) => {
         const state = this.hidePredictions ? undefined : this.frame?.rooms[room.id];
         const p = state?.p ?? 0;

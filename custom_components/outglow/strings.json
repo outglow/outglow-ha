@@ -95,7 +95,8 @@
           "learning": "Learning",
           "ready": "Ready",
           "degraded": "Degraded",
-          "paused": "Paused"
+          "paused": "Paused",
+          "plan_too_large": "Plan too large"
         }
       },
       "false_alarms_24h": {
@@ -241,9 +242,13 @@
     }
   },
   "issues": {
+    "rates_waiting": {
+      "title": "Activity rates not restored",
+      "description": "Outglow was removed or disabled before it could restore the activity rate of {count} bulbs, so they may still report at the raised session rate: {bulbs}. Home Assistant restores each of them once Zigbee2MQTT is online and reports its options, and only while it is still at the raised rate (a rate you changed is left as it is); a bulb counts as restored when Zigbee2MQTT reports the restored rate. It is waiting for Zigbee2MQTT now. After a restart, add or enable Outglow again (it restores them at start) or set motion_activity_rate for these bulbs in Zigbee2MQTT."
+    },
     "rates_not_restored": {
       "title": "Activity rates not restored",
-      "description": "Outglow was removed or disabled while MQTT was unavailable, so {count} bulbs may still report at the raised session rate: {bulbs}. Home Assistant restores each of them once Zigbee2MQTT reports its options, and only while it is still at the raised rate (a rate you changed is left as it is). A failed attempt is repeated less often each time, now every {retry} min, at most every 30 min. After a restart, add or enable Outglow again (it restores them at start) or set motion_activity_rate for these bulbs in Zigbee2MQTT."
+      "description": "Outglow was removed or disabled before it could restore the activity rate of {count} bulbs, so they may still report at the raised session rate: {bulbs}. Home Assistant restores each of them once Zigbee2MQTT is online and reports its options, and only while it is still at the raised rate (a rate you changed is left as it is). A failed attempt is repeated less often each time, now every {retry} min, at most every 30 min. After a restart, add or enable Outglow again (it restores them at start) or set motion_activity_rate for these bulbs in Zigbee2MQTT."
     },
     "output_attribute": {
       "title": "Zigbee2MQTT sends attributes, not JSON",
@@ -264,6 +269,10 @@
     "plan_incomplete": {
       "title": "Plan is incomplete",
       "description": "Sensing bulbs not on the plan: {bulbs}. Bulbs outside every room: {outside}."
+    },
+    "plan_too_large": {
+      "title": "Plan is too large — simplify it",
+      "description": "Outglow does not sense with this plan until it is simpler: {problem}. Open Outglow → Plan and use fewer rooms, room corners or bulbs, or add the doors between rooms."
     },
     "plan_missing": {
       "title": "Draw the plan",
@@ -304,6 +313,34 @@
     "panel_conflict": {
       "title": "The sidebar path /{path} is taken",
       "description": "Another panel already uses /{path}, so the Outglow panel is not in the sidebar. Remove or rename that panel (for example a panel_custom or panel_iframe entry in configuration.yaml) and reload Outglow. Sensing and the entities work without the panel."
+    },
+    "plan_unreadable": {
+      "title": "The stored plan could not be read",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "The stored plan could not be read",
+            "description": "Outglow could not read its stored plan, so it runs without rooms and keeps every room entity and device as it is. The unreadable plan is kept as {path}.\n\nTo get it back, fix that file (or put a copy from a backup in its place) and choose Restore. If you draw a new plan instead, the first saved plan with rooms replaces the old one: old rooms that are not in it are removed with their entities, and their ids are not given to new rooms.",
+            "menu_options": {
+              "restore": "Restore the plan from the kept file",
+              "discard": "Discard the old plan"
+            }
+          },
+          "discard": {
+            "title": "Discard the old plan",
+            "description": "Outglow forgets the old plan. These old rooms are removed with their entities, devices and learning: {rooms}. Their ids are not given to new rooms. The copy of the old plan stays in .storage."
+          }
+        },
+        "abort": {
+          "still_unreadable": "{path} still cannot be read. Fix the file (or replace it with a copy from a backup) and try again.",
+          "restore_failed": "The plan was not restored: {message}",
+          "resolved": "The plan is readable again; nothing to do."
+        }
+      }
+    },
+    "session_rates_waiting": {
+      "title": "Activity rates not restored after a session",
+      "description": "Outglow raised the activity rate of {count} bulbs for a learning session and has been waiting more than {minutes} minutes for Zigbee2MQTT to confirm the restored rate: {bulbs}. It sends the rate again whenever Home Assistant reconnects to the MQTT broker or Zigbee2MQTT comes back online. Check that Zigbee2MQTT is running and reachable, or set motion_activity_rate for these bulbs in Zigbee2MQTT."
     }
   }
 }

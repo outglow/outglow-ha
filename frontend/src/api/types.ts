@@ -49,6 +49,7 @@ export type Bulb = {
   model: string;
   available: boolean;
   sensing: boolean;
+  detector: "rule" | "cfar";
   probes: number | null;
   activity_rate: number | null;
   sensitivity: number | null;
@@ -164,7 +165,7 @@ export type LiveSubscribeRequest = {
   rate_hz: number;
 };
 
-export type EventKind = "motion_on" | "motion_off" | "false_alarm" | "missed" | "correct" | "label" | "veto" | "bulb_write" | "model_apply" | "model_discard" | "model_rollback" | "session_start" | "session_stop" | "house_empty" | "house_occupied";
+export type EventKind = "motion_on" | "motion_off" | "false_alarm" | "missed" | "correct" | "label" | "veto" | "bulb_write" | "model_apply" | "model_discard" | "model_rollback" | "model_reset" | "snapshot_delete" | "session_start" | "session_stop" | "house_empty" | "house_occupied";
 
 export type HistoryEvent = {
   t: Timestamp;
@@ -218,6 +219,7 @@ export type FeedbackResponse = {
 
 export type Info = {
   version: string;
+  entry_id: string;
   status: Status;
   base_topic: string;
   units: "metric" | "imperial";
@@ -259,6 +261,7 @@ export type Snapshot = {
   t: Timestamp;
   reason: "daily" | "before_session" | "before_apply" | "before_reset" | "before_rollback";
   model_version: number;
+  mode?: Mode;
 };
 
 export type SnapshotList = {
@@ -361,6 +364,7 @@ export type ExcludedDirection = {
 export type PlanGetResponse = {
   rev: number;
   plan: Plan;
+  reserved_rooms: RoomId[];
 };
 
 export type PlanSaveRequest = {
@@ -373,6 +377,7 @@ export type PlanSaveResponse = {
   rev: number;
   warnings: PlanWarning[];
   background: Background | null;
+  retired_rooms: RoomId[];
 };
 
 export type BackgroundUpload = {
@@ -438,6 +443,7 @@ export type BackgroundImage = {
 
 export type BackgroundGetResponse = {
   image: BackgroundImage | null;
+  file: string | null;
 };
 
 export type BackgroundSetResponse = {
@@ -485,7 +491,7 @@ export type PairQuality = {
   information: Record<string, number>;
 };
 
-export type RecommendationKind = "skip_direction" | "raise_sensitivity" | "weak_coverage" | "more_empty_house" | "frozen_direction" | "no_bulbs";
+export type RecommendationKind = "skip_direction" | "raise_sensitivity" | "weak_coverage" | "more_empty_house" | "frozen_direction" | "no_bulbs" | "one_bulb";
 
 export type RecommendationAction = "skip_direction" | "bulb_write" | "wizard" | "show_candidates" | "none";
 
@@ -559,6 +565,7 @@ export type ContextRecord = {
   persons_home: string[];
   house_empty: "yes" | "soft" | "no" | "unknown";
   offline: Ieee[];
+  cfar?: Ieee[];
 };
 
 export type Label = {
@@ -621,6 +628,8 @@ export type SessionSummary = {
   suggest_mode?: Mode | null;
   rooms_without_bulbs?: RoomId[];
   empty_house_hours?: number;
+  empty_setup?: "none" | "persons" | "learning" | "both";
+  empty_needed_h?: number;
 };
 
 export type SessionScore = {

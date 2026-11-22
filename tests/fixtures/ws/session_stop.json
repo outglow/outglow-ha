@@ -130,7 +130,9 @@
       "rooms_without_bulbs": [
         "office"
       ],
-      "empty_house_hours": 0.0
+      "empty_house_hours": 0.0,
+      "empty_setup": "persons",
+      "empty_needed_h": 2.0
     }
   }
 }

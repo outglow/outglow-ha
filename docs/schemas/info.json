@@ -4,9 +4,10 @@
   "title": "Info",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "status", "base_topic", "units", "capabilities"],
+  "required": ["version", "entry_id", "status", "base_topic", "units", "capabilities"],
   "properties": {
     "version": {"type": "string", "description": "Integration version"},
+    "entry_id": {"type": "string", "description": "Config entry of the integration; what the panel keeps in the browser belongs to it"},
     "status": {"$ref": "frame.json#/$defs/Status"},
     "base_topic": {"type": "string"},
     "units": {"enum": ["metric", "imperial"], "description": "Length units of the Home Assistant configuration; the plan is always in metres"},

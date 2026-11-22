@@ -1,6 +1,6 @@
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import islice
 from operator import itemgetter
 from typing import Any
@@ -25,6 +25,8 @@ class TickRecord:
     codes: bytes
     p: tuple[float, ...]
     empty: HouseEmpty
+    taught: float = 0.0
+    paired: float = 0.0
 
 
 class Learner:
@@ -63,9 +65,18 @@ class Learner:
                 codes=bytes(pairs(rec.codes + _PAD_NONE)),
                 p=rooms((*rec.p, 0.0)),
                 empty=rec.empty,
+                taught=rec.taught,
+                paired=rec.paired,
             )
             for rec in records
         )
+
+    def copy(self) -> Learner:
+        twin = Learner.__new__(Learner)
+        twin._topo, twin._tick_s, twin._reach = self._topo, self._tick_s, self._reach
+        twin.buffer = deque(self.buffer, maxlen=self.buffer.maxlen)
+        twin.recorded = self.recorded
+        return twin
 
     def record(self, rec: TickRecord) -> None:
         self.buffer.append(rec)
@@ -74,27 +85,43 @@ class Learner:
     def window(self, t0: float, t1: float) -> Iterator[TickRecord]:
         return (r for r in self.buffer if t0 <= r.t <= t1)
 
-    def background(
-        self, model: Model, rec: TickRecord, prev: TickRecord | None, weight: float, cfar: bool, pairs: bool = True
-    ) -> None:
+    def empty_tick(self, model: Model, seq: int, weight: float) -> None:
+        index = len(self.buffer) - (self.recorded - seq)
+        if index >= 1 and self._teach(model, index, self.buffer[index - 1], weight, weight == 1.0):
+            model.labels["empty_house"] = model.labels.get("empty_house", 0) + 1
+
+    def _teach(self, model: Model, index: int, prev: TickRecord | None, weight: float, pairs: bool) -> bool:
+        rec = self.buffer[index]
+        extra = max(0.0, weight - rec.taught)
+        paired = max(0.0, weight - rec.paired) if pairs else 0.0
+        if not extra and not paired:
+            return False
         model.decay(rec.t)
-        if cfar:
-            for i, d in enumerate(self._topo.directions):
-                level = rec.levels[i]
-                if level == CENSORED:
-                    model.hist_of(d).censored += weight
-                elif level != NONE:
-                    model.hist_of(d).add(level, weight)
-                if rec.states[i] == EXCEED and (prev is None or prev.states[i] != EXCEED):
-                    model.bg_onsets[d] = model.bg_onsets.get(d, 0.0) + weight
-            model.bg_ticks += weight
-            model.empty_s += weight * self._tick_s
-        if pairs:
-            self._pair_counts(model, rec, weight, None)
+        if extra:
+            self.background(model, rec, prev, extra)
+        if paired:
+            self._pair_counts(model, rec, paired, None)
+        self.buffer[index] = replace(rec, taught=rec.taught + extra, paired=rec.paired + paired)
+        return True
+
+    def background(self, model: Model, rec: TickRecord, prev: TickRecord | None, weight: float) -> None:
+        model.decay(rec.t)
+        for i, d in enumerate(self._topo.directions):
+            level = rec.levels[i]
+            if level == CENSORED:
+                model.hist_of(d).censored += weight
+            elif level != NONE:
+                model.hist_of(d).add(level, weight)
+            if rec.states[i] == EXCEED and (prev is None or prev.states[i] != EXCEED):
+                model.bg_onsets[d] = model.bg_onsets.get(d, 0.0) + weight
+        model.bg_ticks += weight
+        model.empty_s += weight * self._tick_s
 
     def _pair_counts(
         self, model: Model, rec: TickRecord, weight: float, room: str | None, skip: frozenset[int] = frozenset()
     ) -> bool:
+        if weight <= 0:
+            return False
         taught = False
         for i, pair in enumerate(self._topo.pairs):
             code = rec.codes[i]
@@ -119,10 +146,11 @@ class Learner:
             return 0
         count = len(records)
         if label.kind == "empty" and label.room is None:
-            prev = None
-            for rec in records:
-                self.background(model, rec, prev, label.weight, cfar=True)
-                prev = rec
+            indices = [i for i, rec in enumerate(self.buffer) if t0 <= rec.t <= t1]
+            count = sum(
+                self._teach(model, i, self.buffer[i - 1] if i > indices[0] else None, label.weight, True)
+                for i in indices
+            )
         elif label.kind == "empty" or label.activity == "still":
             assert label.room is not None
             still = label.kind == "room"

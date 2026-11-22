@@ -19,6 +19,7 @@ import type {
   Bulb,
   BulbSetting,
   GlobalSettings,
+  Mode,
   ModelSummary,
   QualityReport,
   Reaction,
@@ -74,6 +75,7 @@ export const ts = strings(
     sensitivity: "Sensitivity",
     probes: "Probes",
     auto_cal: "Auto-calibration",
+    detector_cfar: "Detector in the bulb: CFAR — line data skipped",
     reports: "Activity reports",
     reports_off: "off",
     rate: "{n}/s",
@@ -113,6 +115,9 @@ export const ts = strings(
     rollback: "Roll back",
     rollback_title: "Roll the model back?",
     rollback_text: "The model returns to version {n} from {when}. The current model is kept as a snapshot, so this can be undone.",
+    rollback_mode: "Detection also goes back to {mode} mode, which was on before this change.",
+    snapshot_mode: "also sets {mode} mode back",
+    snapshots_mode_hint: "Rolling back changes the model only. The detection mode goes back only with a snapshot taken before an apply that switched it; those say so.",
     rolled_back: "Model rolled back",
     delete_snapshot: "Delete",
     delete_snapshot_label: "Delete the snapshot from {when}",
@@ -198,6 +203,7 @@ export const ts = strings(
     sensitivity: "Czułość",
     probes: "Sondy",
     auto_cal: "Autokalibracja",
+    detector_cfar: "Detektor w żarówce: CFAR — dane linii pominięte",
     reports: "Raporty aktywności",
     reports_off: "wyłączone",
     rate: "{n}/s",
@@ -237,6 +243,9 @@ export const ts = strings(
     rollback: "Cofnij",
     rollback_title: "Cofnąć model?",
     rollback_text: "Model wróci do wersji {n} z {when}. Obecny model zostanie zapisany jako migawka, więc da się to odwrócić.",
+    rollback_mode: "Wykrywanie wróci też do trybu „{mode}”, który był włączony przed tą zmianą.",
+    snapshot_mode: "przywraca też tryb „{mode}”",
+    snapshots_mode_hint: "Cofnięcie zmienia tylko model. Tryb wykrywania wraca tylko z migawki zrobionej przed zastosowaniem, które go przełączyło; takie migawki mają dopisek.",
     rolled_back: "Model cofnięty",
     delete_snapshot: "Usuń",
     delete_snapshot_label: "Usuń migawkę z {when}",
@@ -743,6 +752,10 @@ export class OutglowSettingsView extends ViewBase {
       .snapshots li:first-child {
         border-top: none;
       }
+      .snapshots-hint {
+        margin: 0;
+        padding: 0 16px 8px;
+      }
       .snapshots .when {
         display: grid;
         gap: 2px;
@@ -1027,6 +1040,9 @@ export class OutglowSettingsView extends ViewBase {
         </div>
         <div><dt>${ts(loc, "gate")}</dt><dd>${fmtPercent(loc, bulb.gate_duty_24h)}</dd></div>
       </dl>
+      ${bulb.detector === "cfar"
+        ? html`<div class="notice info" data-detector="cfar">${icon(mdiInformation, 20)}<span>${ts(loc, "detector_cfar")}</span></div>`
+        : nothing}
       <div>
         <button class="btn outlined" ?disabled=${!bulb.available} data-change=${bulb.ieee} @click=${() => (this._write = { bulb, setting: "sensitivity" })}>
           ${ts(loc, "change")}
@@ -1078,6 +1094,10 @@ export class OutglowSettingsView extends ViewBase {
     }
   }
 
+  private _switchBack(snap: Snapshot): Mode | null {
+    return snap.mode && snap.mode !== this._saved?.global.mode ? snap.mode : null;
+  }
+
   private async _doRollback(): Promise<void> {
     const snap = this._rollback;
     if (!snap) return;
@@ -1086,6 +1106,11 @@ export class OutglowSettingsView extends ViewBase {
       await this.call("outglow/model/rollback", { snapshot_id: snap.snapshot_id });
       this.toast(ts(this.loc, "rolled_back"));
       this._rollback = null;
+      const mode = this._switchBack(snap);
+      if (mode) {
+        if (this._saved) this._saved = { ...this._saved, global: { ...this._saved.global, mode } };
+        if (this._draft) this._draft = { ...this._draft, global: { ...this._draft.global, mode } };
+      }
       await this._reloadModel();
     } catch (err) {
       this.fail(err);
@@ -1237,6 +1262,7 @@ export class OutglowSettingsView extends ViewBase {
         : html`<p class="muted-box">${ts(loc, "no_pending")}</p>`}
       <details>
         <summary>${ts(loc, "snapshots")} (${this._snapshots.length})</summary>
+        ${this._snapshots.length ? html`<p class="hint snapshots-hint">${ts(loc, "snapshots_mode_hint")}</p>` : nothing}
         ${this._snapshots.length
           ? html`<ul class="snapshots">
               ${[...this._snapshots]
@@ -1245,7 +1271,11 @@ export class OutglowSettingsView extends ViewBase {
                   (snap) => html`<li>
                     <span class="when">
                       <span>${fmtDateTime(loc, snap.t)} · ${ts(loc, "version", { n: snap.model_version })}</span>
-                      <span class="hint">${ts(loc, `reason_${snap.reason}`)}</span>
+                      <span class="hint"
+                        >${ts(loc, `reason_${snap.reason}`)}${this._switchBack(snap)
+                          ? html` · <span class="snapshot-mode">${ts(loc, "snapshot_mode", { mode: ts(loc, `mode_${this._switchBack(snap)!}`) })}</span>`
+                          : nothing}</span
+                      >
                     </span>
                     <button class="btn" @click=${() => (this._rollback = snap)}>${icon(mdiBackupRestore, 18)} ${ts(loc, "rollback")}</button>
                     <button
@@ -1372,7 +1402,10 @@ export class OutglowSettingsView extends ViewBase {
       ></og-bulb-write>
       <og-sheet .open=${Boolean(this._rollback)} heading=${ts(loc, "rollback_title")} close-label=${tc(loc, "close")} @closed=${() => (this._rollback = null)}>
         ${this._rollback
-          ? html`<p>${ts(loc, "rollback_text", { n: this._rollback.model_version, when: fmtDateTime(loc, this._rollback.t) })}</p>`
+          ? html`<p>${ts(loc, "rollback_text", { n: this._rollback.model_version, when: fmtDateTime(loc, this._rollback.t) })}</p>
+              ${this._switchBack(this._rollback)
+                ? html`<p class="rollback-mode">${ts(loc, "rollback_mode", { mode: ts(loc, `mode_${this._switchBack(this._rollback)!}`) })}</p>`
+                : nothing}`
           : nothing}
         <div slot="actions" class="actions">
           <button class="btn neutral" @click=${() => (this._rollback = null)}>${tc(loc, "cancel")}</button>

@@ -8,6 +8,7 @@ import {
   emptyPlan,
   importPlan,
   linkedVertices,
+  looksRetired,
   moveVertex,
   nearestWall,
   normalize,
@@ -16,7 +17,11 @@ import {
   remove,
   removeBulb,
   removeRoom,
+  sameContent,
   samePlan,
+  retiredOver,
+  retireGone,
+  reviveRetired,
   setEdgeLength,
   setWallKind,
   trackSelection,
@@ -217,24 +222,98 @@ describe("undo history", () => {
   });
 });
 
+describe("retired rooms", () => {
+  it("renames rooms that came back with a retired id and leaves other plans alone", () => {
+    const p = updateBulb(plan(), "0x0000000000000004", { room: "office" });
+    const { plan: next, renamed } = reviveRetired(p, ["office"]);
+    expect(renamed).toEqual([{ from: "office", to: "office_2", name: "Office" }]);
+    expect(next.rooms.map((r) => r.id)).toEqual(["living", "hall", "office_2"]);
+    expect(next.bulbs.find((b) => b.ieee.endsWith("4"))!.room).toBe("office_2");
+    expect(next.adjacent.flat()).not.toContain("office");
+    expect(next.retired_rooms).toEqual(["office"]);
+    const untouched = { ...plan(), retired_rooms: ["attic"] };
+    expect(reviveRetired(untouched, ["attic"]).plan).toBe(untouched);
+    expect(reviveRetired(untouched, ["cellar"]).plan.retired_rooms).toEqual(["attic", "cellar"]);
+  });
+
+  it("retires a room that left the plan by any edit, so a room drawn with its name gets a new id", () => {
+    const saved = { ...plan(), retired_rooms: ["attic"] };
+    const replaced = { ...saved, rooms: saved.rooms.filter((r) => r.id !== "office"), adjacent: saved.adjacent.filter((a) => !a.includes("office")) };
+    const next = retireGone(replaced, saved);
+    expect(next.retired_rooms).toEqual(["attic", "office"]);
+    expect(addRoom(next, rectangle([0, 9], [3, 12]), "Office").id).toBe("office_2");
+    expect(retireGone(next, saved)).toBe(next);
+    expect(retireGone(saved, saved)).toBe(saved);
+    expect(retireGone(replaced, null)).toBe(replaced);
+  });
+
+  it("keeping my plan over another client's retires what that client removed or added", () => {
+    const base = { ...plan(), retired_rooms: ["attic"] };
+    const theirs = { ...base, rooms: [...base.rooms.filter((r) => r.id !== "office"), { ...base.rooms[2]!, id: "room_4", name: "Room 4" }], retired_rooms: ["attic", "office"] };
+    const mine = addRoom(base, rectangle([0, 9], [3, 12]), "Room 4");
+    expect(mine.id).toBe("room_4");
+    const retired = retiredOver(base, theirs);
+    expect(retired).toEqual(["attic", "office", "room_4"]);
+    const { plan: kept, renamed } = reviveRetired(mine.plan, retired);
+    expect(renamed.map((r) => [r.from, r.to])).toEqual([
+      ["office", "office_2"],
+      ["room_4", "room_4_2"],
+    ]);
+    expect(kept.rooms.map((r) => r.id)).toEqual(["living", "hall", "office_2", "room_4_2"]);
+  });
+
+  it("spots a room named like a retired one", () => {
+    const room = { ...plan().rooms[2]!, id: "room_4", name: "Office" };
+    expect(looksRetired(room, ["office"])).toBe(true);
+    expect(looksRetired(room, ["hall"])).toBe(false);
+    expect(looksRetired({ ...room, id: "office" }, ["office"])).toBe(false);
+  });
+});
+
 describe("import", () => {
   it("takes the imported plan but keeps the editor's revision", () => {
     const current = { ...plan(), rev: 7 };
     const imported = { ...emptyPlan(), rooms: plan().rooms };
-    const next = importPlan(current, imported);
+    const next = importPlan(current, imported, current).plan;
     expect(next.rev).toBe(7);
     expect(next.rooms).toHaveLength(3);
   });
 
-  it("renames imported rooms whose ids belonged to removed rooms", () => {
-    const current = { ...removeRoom(plan(), "office"), rev: 7 };
+  it("renames imported rooms whose ids belonged to saved removed rooms", () => {
+    const saved = { ...plan(), rooms: plan().rooms.filter((r) => r.id !== "office"), retired_rooms: ["office"], rev: 7 };
     const imported = { ...plan(), retired_rooms: ["attic"], bulbs: plan().bulbs.map((b) => ({ ...b, room: b.ieee.endsWith("4") ? "office" : b.room })) };
-    const next = importPlan(current, imported);
+    const { plan: next, renamed } = importPlan(saved, imported, saved);
+    expect(renamed).toEqual([{ from: "office", to: "office_2", name: "Office" }]);
     expect(next.rooms.map((r) => r.id)).toEqual(["living", "hall", "office_2"]);
     expect(next.bulbs.find((b) => b.ieee.endsWith("4"))!.room).toBe("office_2");
     expect(next.adjacent.flat()).not.toContain("office");
     expect(next.adjacent.flat()).toContain("office_2");
     expect(new Set(next.retired_rooms)).toEqual(new Set(["office", "attic"]));
+  });
+
+  it("brings back a room removed only in the editor under its own id", () => {
+    const saved = plan();
+    const current = removeRoom(saved, "office");
+    const { plan: next, renamed } = importPlan(current, saved, saved);
+    expect(renamed).toEqual([]);
+    expect(next.rooms.map((r) => r.id)).toEqual(["living", "hall", "office"]);
+    expect(next.retired_rooms).toEqual([]);
+  });
+
+  it("retires the saved rooms the import leaves out and keeps the ones it brings back", () => {
+    const current = { ...plan(), rev: 3, retired_rooms: [] };
+    const only = { ...emptyPlan(), rooms: plan().rooms.filter((r) => r.id === "living") };
+    const first = importPlan(current, only, current).plan;
+    expect(first.retired_rooms).toEqual(["hall", "office"]);
+    const again = importPlan(first, { ...plan(), retired_rooms: [] }, current);
+    expect(again.plan.rooms.map((r) => r.id)).toEqual(["living", "hall", "office"]);
+    expect(again.renamed).toEqual([]);
+    const gone = { ...current, retired_rooms: ["office"] };
+    expect(importPlan(current, plan(), gone).plan.rooms.map((r) => r.id)).toEqual(["living", "hall", "office_2"]);
+  });
+
+  it("never gives a new room the id of an old room Home Assistant still knows", () => {
+    expect(addRoom(emptyPlan(), rectangle([0, 0], [3, 2]), "Room 1", ["room_1"]).id).toBe("room_1_2");
   });
 
   it("translates import warnings", () => {
@@ -251,5 +330,22 @@ describe("import", () => {
       "Pominięto fragment mapy 2: tylko 0,16 m²",
     );
     expect(warningText("en", { code: "no_doors", params: {} })).toBe("No doorways found between the rooms; draw the doors yourself");
+  });
+});
+
+describe("the plan as the server keeps it", () => {
+  it("is the same whatever the order of keys and retired rooms, and the revision", () => {
+    const p: Plan = { ...structuredClone(MOCK_PLAN), retired_rooms: ["office", "hall"] };
+    const server = JSON.parse(JSON.stringify({ ...p, rev: p.rev + 1, retired_rooms: ["hall", "office"] }, (_k, v) =>
+      v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).reverse()) : v,
+    )) as Plan;
+    expect(samePlan(p, server)).toBe(false);
+    expect(sameContent(p, server)).toBe(true);
+    expect(sameContent(p, { ...server, rooms: server.rooms.slice(1) })).toBe(false);
+    const placed: Plan = { ...p, background: { file: "import.svg", x: 0, y: 0, m_per_px: 0.05, opacity: 0.35 } };
+    const stored: Plan = { ...placed, background: { ...placed.background!, file: "plan-0123456789abcdef.svg" } };
+    expect(sameContent(placed, stored)).toBe(false);
+    expect(sameContent(placed, stored, true)).toBe(true);
+    expect(sameContent(placed, p, true)).toBe(false);
   });
 });

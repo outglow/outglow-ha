@@ -159,6 +159,47 @@ describe("learning view and rooms without bulbs", () => {
     el.remove();
   });
 
+  it("puts the first choice first and labels only the pressed button as busy", async () => {
+    const { el, backend } = await view();
+    backend.model = { ...backend.model, pending: { pending_id: "p-0008", created: 0, labels: { wizard: 4 }, rooms: [] } };
+    const order = () => [...el.shadowRoot!.querySelectorAll(".summary-actions .big")].map((b) => b.textContent?.trim());
+    await show(el, rulesSummary({ empty_house_hours: 3 }));
+    expect(order()).toEqual(["Switch to bayes and apply", "Apply and stay in rules mode"]);
+    await show(el, rulesSummary({ empty_house_hours: 0 }));
+    expect(order()).toEqual(["Apply and stay in rules mode", "Switch to bayes and apply"]);
+    backend.latency = 50;
+    button(el, "Apply and stay in rules mode").click();
+    await el.updateComplete;
+    expect(order()).toEqual(["Applying…", "Switch to bayes and apply"]);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    await settle(el);
+    expect(el._phase).toBe("finished");
+    expect(backend.settings.global.mode).toBe("rules");
+    el.remove();
+  });
+
+  it("points to the settings that let an empty home teach the model by itself", async () => {
+    const { el } = await view();
+    const paths: string[] = [];
+    el.addEventListener("og-navigate", (e) => paths.push((e as CustomEvent<{ path: string }>).detail.path));
+    const notice = () => el.shadowRoot!.querySelector(".empty-unknown")?.textContent ?? "";
+    await show(el, rulesSummary({ empty_house_hours: 0, empty_setup: "none" }));
+    expect(notice()).toContain("leave learning on while everyone is out");
+    expect(el.shadowRoot!.querySelector(".empty-unknown button")).toBeNull();
+    await show(el, rulesSummary({ empty_house_hours: 0, empty_setup: "persons" }));
+    expect(notice()).toContain("or choose the people at home in Settings: then an empty home teaches the model by itself (at least 2 h).");
+    expect(notice()).not.toContain("leave learning on");
+    await show(el, rulesSummary({ empty_house_hours: 0.5, empty_setup: "learning" }));
+    expect(notice()).toContain("or turn learning on in Settings");
+    await show(el, rulesSummary({ empty_house_hours: 0, empty_setup: "none", empty_needed_h: 6.7 }));
+    expect(notice()).toContain("while everyone is out for at least 6.7 h.");
+    await show(el, rulesSummary({ empty_house_hours: 0.5, empty_setup: "both" }));
+    expect(notice()).toContain("or in Settings choose the people at home and turn learning on");
+    el.shadowRoot!.querySelector<HTMLButtonElement>(".empty-unknown button")!.click();
+    expect(paths).toEqual(["/settings"]);
+    el.remove();
+  });
+
   it("reads a summary saved before it carried its mode in the current mode", async () => {
     const { el } = await view();
     el._mode = "bayes";

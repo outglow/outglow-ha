@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import math
 from collections.abc import Iterable, Iterator
@@ -8,6 +9,7 @@ from homeassistant.core import CALLBACK_TYPE, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_call_later
 
+from . import repairs
 from .const import (
     LABEL_WEIGHTS,
     RATE_DEFAULT,
@@ -15,15 +17,16 @@ from .const import (
     SESSION_IDLE_S,
     SESSION_RATE,
     SESSION_RATE_MAX_S,
+    SESSION_RATES_REPAIR_S,
     STEP_MAX_S,
     SUMMARY_LEAD_S,
 )
 from .engine import Engine, to_json
-from .engine.defaults import EMPTY_MARGIN_S, LABEL_TRIM_S
-from .engine.model import from_json as model_from_json
+from .engine.defaults import EMPTY_ADVICE_H, EMPTY_MARGIN_S, SOFT_EMPTY_WEIGHT
 from .engine.topology import bulb_room
 from .engine.types import Frame, Json, Label, Mode, Plan, Record, Settings
 from .errors import OutglowError
+from .z2m import async_restore_raised, follow_reconnect
 
 if TYPE_CHECKING:
     from .coordinator import OutglowCoordinator
@@ -199,6 +202,14 @@ def _in_mode(settings: Settings, mode: Mode) -> Settings:
     return replace(settings, global_=replace(settings.global_, mode=mode))
 
 
+EMPTY_SETUP = {
+    (True, True): "none",
+    (False, True): "persons",
+    (True, False): "learning",
+    (False, False): "both",
+}
+
+
 def summarise(
     plan: Plan,
     settings: Settings,
@@ -206,6 +217,7 @@ def summarise(
     records: list[Record],
     session: dict[str, Any],
     labels: list[Label],
+    empty_s: float = 0.0,
 ) -> dict[str, Any]:
     mode = settings.global_.mode
     before, accuracy_before = confusion(plan, settings, model, records, session)
@@ -229,10 +241,6 @@ def summarise(
         if b_accuracy_after is not None and b_accuracy_after >= (accuracy_before or 0.0) + SUGGEST_MARGIN:
             suggest = "bayes"
     lit = {bulb_room(plan, b) for b in plan.bulbs}
-    active = model.get("active") if model else None
-    empty_s = model_from_json(active if isinstance(active, dict) else None).empty_s + sum(
-        max(0.0, lb.t1 - lb.t0 - 2 * LABEL_TRIM_S) for lb in labels if lb.kind == "empty" and lb.room is None
-    )
     return {
         "rooms": [room.id for room in plan.rooms],
         "mode": mode,
@@ -244,7 +252,20 @@ def summarise(
         "suggest_mode": suggest,
         "rooms_without_bulbs": [room.id for room in plan.rooms if room.id not in lit],
         "empty_house_hours": round(empty_s / 3600, 3),
+        "empty_setup": empty_setup(settings),
+        "empty_needed_h": empty_needed_h(settings),
     }
+
+
+def empty_needed_h(settings: Settings) -> float:
+    weight = SOFT_EMPTY_WEIGHT if settings.global_.others_may_be_home else 1.0
+    return round(EMPTY_ADVICE_H / weight, 1)
+
+
+def empty_setup(settings: Settings) -> str:
+    g = settings.global_
+    persons = g.use_persons and bool(g.persons)
+    return EMPTY_SETUP[(persons, g.learning)]
 
 
 class SessionManager:
@@ -255,6 +276,14 @@ class SessionManager:
         self.rate_until: float | None = None
         self._unsub_restore: CALLBACK_TYPE | None = None
         self._unsub_idle: CALLBACK_TYPE | None = None
+        self._unsub_reconnect: CALLBACK_TYPE | None = None
+        self._unsub_overdue: CALLBACK_TYPE | None = None
+        self._rates = asyncio.Lock()
+        self._epoch = 0
+        self._starting = asyncio.Lock()
+        self.rates_overdue = False
+        self._due = False
+        self._sent: set[str] = set()
         self.delays: list[float] = []
 
     def load(self, runtime: dict[str, Any]) -> None:
@@ -298,10 +327,14 @@ class SessionManager:
         }
 
     async def async_start(self, name: str, raise_rate: bool) -> dict[str, Any]:
+        async with self._starting:
+            return await self._async_start(name, raise_rate)
+
+    async def _async_start(self, name: str, raise_rate: bool) -> dict[str, Any]:
         if self.session is not None and self.session["state"] == "running":
             raise OutglowError("busy", "A session is already running")
         now = self._c.now()
-        with self._c.holding(self._c.snapshot("before_session", now)):
+        with self._c.holding(await self._c.async_snapshot("before_session", now)):
             session_id = f"s-{self._c.model.next_seq():04d}"
             self._c.schedule_save_model()
             session: dict[str, Any] = {
@@ -350,14 +383,23 @@ class SessionManager:
         self._c.hass.async_create_task(self._async_finish(self._c.now(), summary=True, reason="idle"))
 
     async def _async_raise_rates(self, now: float) -> None:
+        async with self._rates:
+            await self._async_raise(now)
+
+    async def _async_raise(self, now: float) -> None:
         if self.session is None:
             return
+        self._epoch += 1
+        self._cancel_restore()
         devices = self._c.devices
         bulbs = [d for d in devices.bulbs() if d.available and devices.sensing(d)] if devices.info_seen else []
         for device in bulbs:
             if device.ieee not in self.rate_restore:
                 self.rate_restore[device.ieee] = stored_rate(devices.activity_rate(device.ieee))
         self.rate_until = now + SESSION_RATE_MAX_S
+        self._due = False
+        self._sent.clear()
+        self._track_overdue()
         self.session["raised_rate"] = bool(bulbs)
         await self._c.async_save_runtime()
         try:
@@ -366,7 +408,7 @@ class SessionManager:
         except HomeAssistantError as err:
             _LOGGER.warning("Could not raise the activity rate (%s); restoring", err)
             self.session["raised_rate"] = False
-            await self.async_restore_rates()
+            await self._async_restore(retry=True)
             return
         self._schedule_restore()
 
@@ -388,19 +430,67 @@ class SessionManager:
         self._c.hass.async_create_task(self.async_restore_rates())
 
     async def async_restore_rates(self, retry: bool = True) -> bool:
+        epoch = self._epoch
+        async with self._rates:
+            if epoch != self._epoch:
+                return not self.rate_restore
+            return await self._async_restore(retry)
+
+    async def _async_restore(self, retry: bool) -> bool:
         self._cancel_restore()
-        self.rate_until = None
-        for ieee, rate in sorted(self.rate_restore.items()):
-            try:
-                await self._c.writer.async_set_activity_rate(ieee, rate, "session_restore")
-            except HomeAssistantError as err:
-                _LOGGER.warning("Could not restore the activity rate of %s (%s); trying again", ieee, err)
-                break
-            del self.rate_restore[ieee]
-        await self._c.async_save_runtime()
-        if self.rate_restore and retry:
+        until, self.rate_until = self.rate_until, None
+        self._due = True
+        before = dict(self.rate_restore)
+        done = await async_restore_raised(self._c.devices, self.rate_restore, self._sent, self._publish_restore)
+        self._due = bool(self.rate_restore)
+        if self.rate_restore != before or until is not None:
+            await self._c.async_save_runtime()
+        if not done and retry:
+            self._cancel_restore()
             self._unsub_restore = async_call_later(self._c.hass, RATE_RETRY_S, self._restore_due)
+        self._track_overdue()
         return not self.rate_restore
+
+    def _track_overdue(self) -> None:
+        if self.rate_restore and self.rate_until is None:
+            if self._unsub_overdue is None and not self.rates_overdue:
+                self._unsub_overdue = async_call_later(self._c.hass, SESSION_RATES_REPAIR_S, self._overdue)
+            return
+        self._cancel_overdue()
+        if self.rates_overdue:
+            self.rates_overdue = False
+            repairs.update(self._c)
+
+    def _cancel_overdue(self) -> None:
+        if self._unsub_overdue is not None:
+            self._unsub_overdue()
+            self._unsub_overdue = None
+
+    @callback
+    def _overdue(self, _now: Any) -> None:
+        self._unsub_overdue = None
+        self.rates_overdue = True
+        repairs.update(self._c)
+
+    @callback
+    def follow(self) -> None:
+        if self._unsub_reconnect is None:
+            self._unsub_reconnect = follow_reconnect(self._c.hass, lambda: (self._sent,), self._reconnected)
+
+    @callback
+    def _reconnected(self) -> None:
+        if self._due and self.rate_until is None:
+            self._c.hass.async_create_task(self.async_restore_rates())
+
+    async def _publish_restore(self, ieee: str, rate: float) -> None:
+        await self._c.writer.async_set_activity_rate(ieee, rate, "session_restore", assume=False)
+
+    @callback
+    def bridge_changed(self) -> None:
+        if self._c.devices.bridge_online is not True:
+            self._sent.clear()
+        if self._due and self.rate_until is None:
+            self._c.hass.async_create_task(self.async_restore_rates())
 
     async def async_label(self, kind: str, room: str | None, activity: str, ts: float | None) -> dict[str, Any]:
         session = self.session
@@ -451,7 +541,8 @@ class SessionManager:
             if step["kind"] == "empty" and step["t1"] is not None:
                 await self._c.async_copy_empty(float(step["t0"]) + EMPTY_MARGIN_S, float(step["t1"]) - EMPTY_MARGIN_S)
         if summary:
-            session["summary"] = await self._async_summary(session, labels, pending_id, now)
+            empty_s = await self._c.hass.async_add_executor_job(self._c.engine.empty_preview())
+            session["summary"] = await self._async_summary(session, labels, pending_id, empty_s)
         self._c.event(
             "session_stop", None, {"session_id": session["session_id"], "labels": len(labels), "reason": reason}
         )
@@ -459,12 +550,13 @@ class SessionManager:
         return self._view(session)
 
     async def _async_summary(
-        self, session: dict[str, Any], labels: list[Label], pending_id: str | None, now: float
+        self, session: dict[str, Any], labels: list[Label], pending_id: str | None, empty_s: float
     ) -> dict[str, Any]:
         c = self._c
         records = await c.async_records_spans(session_spans(session, SUMMARY_LEAD_S))
+        model = await c.async_active_model()
         result = await c.hass.async_add_executor_job(
-            summarise, c.plan, c.settings, c.active_model(), records, session, labels
+            summarise, c.engine_plan(), c.engine_settings(), model, records, session, labels, empty_s
         )
         frame = c.frame
         weak = [room for room, rf in (frame.rooms.items() if frame else []) if rf.coverage != "good"]
@@ -472,8 +564,14 @@ class SessionManager:
 
     @callback
     def stop(self) -> None:
+        self._due = False
         self._cancel_restore()
         self._cancel_idle()
+        self._cancel_overdue()
+        self.rates_overdue = False
+        if self._unsub_reconnect is not None:
+            self._unsub_reconnect()
+            self._unsub_reconnect = None
 
 
 def stored_rate(value: object) -> float:
