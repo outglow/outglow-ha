@@ -82,7 +82,7 @@ async function press(page: Page, name: string): Promise<void> {
   await run(page, 300);
 }
 
-for (const theme of ["light", "dark"] as const) {
+for (const theme of ["dark"] as const) {
   test(`live desktop ${theme}`, async ({ page }) => {
     await panel(page, "/live", theme, DESKTOP);
     await run(page, 15_000);
@@ -98,7 +98,7 @@ test("live phone", async ({ page }) => {
 });
 
 test("plan editor with a room selected", async ({ page }) => {
-  await panel(page, "/plan", "light", DESKTOP);
+  await panel(page, "/plan", "dark", DESKTOP);
   const editor = page.locator("outglow-plan-editor");
   await until(page, editor.locator("outglow-editor-canvas"));
   const v = await view(page);
@@ -106,7 +106,7 @@ test("plan editor with a room selected", async ({ page }) => {
   await page.mouse.click(x, y);
   await until(page, editor.locator("outglow-editor-canvas g.grip"));
   await page.mouse.move(10, v.top + v.h - 10);
-  await shoot(page, "plan-editor-desktop-light");
+  await shoot(page, "plan-editor-desktop-dark");
 });
 
 test("import from a Valetudo vacuum map", async ({ page }) => {
@@ -146,7 +146,7 @@ test("learning wizard step on a phone", async ({ page }) => {
 });
 
 test("learning wizard summary on a phone", async ({ page }) => {
-  await panel(page, "/learn", "light", PHONE);
+  await panel(page, "/learn", "dark", PHONE);
   await wizardToWalk(page);
   for (let room = 0; room < 3; room += 1) {
     if (room > 0) {
@@ -163,12 +163,12 @@ test("learning wizard summary on a phone", async ({ page }) => {
   await until(page, page.getByRole("heading", { name: "How well Outglow recognises your rooms" }));
   await page.getByRole("radio", { name: "Bayes", exact: true }).click();
   await settle(page);
-  await expect(page).toHaveScreenshot("wizard-summary-phone-light.png", { ...SHOT, fullPage: true });
+  await expect(page).toHaveScreenshot("wizard-summary-phone-dark.png", { ...SHOT, fullPage: true });
 });
 
 test("quality", async ({ page }) => {
-  await panel(page, "/quality", "light", DESKTOP);
-  await shoot(page, "quality-desktop-light");
+  await panel(page, "/quality", "dark", DESKTOP);
+  await shoot(page, "quality-desktop-dark");
 });
 
 test("room settings", async ({ page }) => {
@@ -177,13 +177,13 @@ test("room settings", async ({ page }) => {
 });
 
 test("history", async ({ page }) => {
-  await panel(page, "/history", "light", DESKTOP);
+  await panel(page, "/history", "dark", DESKTOP);
   await run(page, 3000);
-  await shoot(page, "history-desktop-light");
+  await shoot(page, "history-desktop-dark");
 });
 
 for (const [theme, size, label] of [
-  ["light", { width: 1280, height: 560 }, "desktop"],
+  ["dark", { width: 1280, height: 560 }, "desktop"],
   ["dark", PHONE, "phone"],
 ] as const) {
   test(`card ${label}`, async ({ page }) => {
@@ -196,7 +196,7 @@ for (const [theme, size, label] of [
 
 test("animation: live motion", async ({ page }) => {
   test.skip(process.env.OUTGLOW_DOCS !== "write", "animations are only written, not compared");
-  await panel(page, "/live", "light", DESKTOP);
+  await panel(page, "/live", "dark", DESKTOP);
   await run(page, 2500);
   const card = page.locator("outglow-live-view section.card.map");
   const box = (await card.boundingBox())!;
@@ -209,7 +209,7 @@ test("animation: live motion", async ({ page }) => {
 
 test("animation: dragging a wall", async ({ page }) => {
   test.skip(process.env.OUTGLOW_DOCS !== "write", "animations are only written, not compared");
-  await panel(page, "/plan", "light", DESKTOP);
+  await panel(page, "/plan", "dark", DESKTOP);
   const editor = page.locator("outglow-plan-editor");
   await until(page, editor.locator("outglow-editor-canvas"));
   const v = await view(page);

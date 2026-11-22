@@ -15,10 +15,7 @@ It is for people who already run (or plan to run) the open [Outglow firmware](ht
 Zigbee bulbs. Bulbs with the original firmware cannot sense motion.
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/live-desktop-dark.png">
-    <img src="docs/images/live-desktop-light.png" width="860" alt="The Live tab: a floor plan with a living room, a hall and an office; lines between bulbs light up where the radio signal changes and the hall, where the motion is, is highlighted. Beside it, each room's probability of motion.">
-  </picture>
+  <img src="docs/images/live-desktop-dark.png" width="860" alt="The Live tab: a floor plan with a living room, a hall and an office; lines between bulbs light up where the radio signal changes and the hall, where the motion is, is highlighted. Beside it, each room's probability of motion.">
 </p>
 
 > [!WARNING]
@@ -184,7 +181,7 @@ and what the pair has learnt; tap a room for its coverage and settings. **Layers
 bulb names. *Now* counts the pairs that see motion and says whether interference is being ignored.
 
 <p align="center">
-  <img src="docs/images/live-phone-dark.png" width="260" alt="The Live tab on a phone in the dark theme: room chips above the plan, the plan with lines between bulbs.">
+  <img src="docs/images/live-phone-dark.png" width="260" alt="The Live tab on a phone: room chips above the plan, the plan with lines between bulbs.">
 </p>
 
 ### Plan editor
@@ -219,7 +216,7 @@ missing, such as a room without bulbs, a bulb outside every room or rooms that o
   give new ids).
 
 <p align="center">
-  <img src="docs/images/plan-editor-desktop-light.png" width="760" alt="The Plan tab: the living room is selected and shows its handles and edge lengths; the side panel shows its name, area, colour and edges.">
+  <img src="docs/images/plan-editor-desktop-dark.png" width="760" alt="The Plan tab: the living room is selected and shows its handles and edge lengths; the side panel shows its name, area, colour and edges.">
 </p>
 <p align="center">
   <img src="docs/images/wall.gif" width="600" alt="Animation: the wall between the living room and the hall is dragged; it moves in both rooms together with its door.">
@@ -237,7 +234,7 @@ where you walk. What you teach stays a proposal until you apply it on the summar
 <p align="center">
   <img src="docs/images/wizard-step-phone-dark.png" width="260" alt="A wizard step on a phone: walk freely around the hall, 48 seconds left, a small map with the reacting lines, three pairs see you.">
   <img src="docs/images/wizard.gif" width="260" alt="Animation of the wizard on a phone: start, leave the home, come back, walk along the walls of the hall, walk freely.">
-  <img src="docs/images/wizard-summary-phone-light.png" width="260" alt="The summary: in bayes mode 44 % before and 78 % after; a table of where you walked against what the model would say; buttons to apply.">
+  <img src="docs/images/wizard-summary-phone-dark.png" width="260" alt="The summary: in bayes mode 44 % before and 78 % after; a table of where you walked against what the model would say; buttons to apply.">
 </p>
 
 ### Quality
@@ -248,7 +245,7 @@ noisy direction*, *this room is weakly covered: a bulb here would add three path
 needs an empty home*. Changing a bulb's sensitivity from here always shows what it will overwrite and asks first.
 
 <p align="center">
-  <img src="docs/images/quality-desktop-light.png" width="760" alt="The Quality tab: a table of rooms with false alarms per day and coverage, noisy directions and recommendations.">
+  <img src="docs/images/quality-desktop-dark.png" width="760" alt="The Quality tab: a table of rooms with false alarms per day and coverage, noisy directions and recommendations.">
 </p>
 
 ### Settings
@@ -261,7 +258,7 @@ sensitivity, probes, calibration). A write to a bulb is never automatic: a dialo
 through only with a fresh confirmation.
 
 <p align="center">
-  <img src="docs/images/settings-desktop-dark.png" width="760" alt="The Settings tab in the dark theme with the hall's room settings.">
+  <img src="docs/images/settings-desktop-dark.png" width="760" alt="The Settings tab with the hall's room settings.">
 </p>
 
 ### History
@@ -271,7 +268,7 @@ changes of bulbs and of the model). Click a moment to replay it on the plan (up 
 correct it: *nobody was in the hall*, *someone was in the living room*. Corrections become labels for the model.
 
 <p align="center">
-  <img src="docs/images/history-desktop-light.png" width="760" alt="The History tab: room timelines over a day with event markers, a replay of one moment on the plan and the list of events with correction buttons.">
+  <img src="docs/images/history-desktop-dark.png" width="760" alt="The History tab: room timelines over a day with event markers, a replay of one moment on the plan and the list of events with correction buttons.">
 </p>
 
 ## Dashboard card
@@ -301,8 +298,8 @@ height: 260
 <!-- /generated:card -->
 
 <p align="center">
-  <img src="docs/images/card-desktop-light.png" width="640" alt="Two cards: the whole home, and a card limited to the hall and the office.">
-  <img src="docs/images/card-phone-dark.png" width="220" alt="The card on a phone in the dark theme.">
+  <img src="docs/images/card-desktop-dark.png" width="640" alt="Two cards: the whole home, and a card limited to the hall and the office.">
+  <img src="docs/images/card-phone-dark.png" width="220" alt="The card on a phone.">
 </p>
 
 ## Entities
