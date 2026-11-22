@@ -272,7 +272,6 @@ class OutglowCoordinator:
             persons_home=self.house.persons_home,
             house_empty=self.house_empty,
             offline=self.devices.offline(),
-            cfar=self.devices.cfar(),
         )
 
     def _schedule_tick(self) -> None:
@@ -402,12 +401,6 @@ class OutglowCoordinator:
         self._notify()
 
     def availability_changed(self, ieee: str, online: bool) -> None:
-        self._context_changed()
-
-    def detector_changed(self, ieee: str) -> None:
-        self._context_changed()
-
-    def _context_changed(self) -> None:
         ctx = self._context(self.now())
         self.engine.context(ctx)
         if self.settings.global_.sensing:
@@ -970,7 +963,6 @@ class OutglowCoordinator:
                     "model": device.model,
                     "available": device.available,
                     "sensing": self.devices.sensing(device),
-                    "detector": self.devices.detector(device),
                     "probes": _number(state.get("motion_probes")),
                     "activity_rate": self.devices.activity_rate(device.ieee),
                     "sensitivity": _number(state.get("motion_sensitivity")),

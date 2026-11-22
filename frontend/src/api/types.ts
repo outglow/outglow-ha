@@ -49,7 +49,6 @@ export type Bulb = {
   model: string;
   available: boolean;
   sensing: boolean;
-  detector: "rule" | "cfar";
   probes: number | null;
   activity_rate: number | null;
   sensitivity: number | null;
@@ -565,7 +564,6 @@ export type ContextRecord = {
   persons_home: string[];
   house_empty: "yes" | "soft" | "no" | "unknown";
   offline: Ieee[];
-  cfar?: Ieee[];
 };
 
 export type Label = {

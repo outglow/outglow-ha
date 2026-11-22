@@ -213,7 +213,6 @@ export class MockBackend {
         model: i % 2 === 0 ? "outglow-tw" : "outglow-dimm",
         available: !offline,
         sensing: !offline,
-        detector: ieee === "0x0000000000000003" ? "cfar" : "rule",
         probes: offline ? null : 5,
         activity_rate: offline ? null : ieee === "0x0000000000000005" ? 0 : 2,
         sensitivity: offline ? null : ieee === "0x0000000000000004" ? 40 : 45,
@@ -679,7 +678,7 @@ export class MockBackend {
     } else if (request.setting === "sensing" && request.value === false) {
       effects.push({ code: "stops_sensing", params: {} });
     } else if (request.setting === "calibrate") {
-      effects.push({ code: "starts_calibration", params: { seconds: bulb.detector === "cfar" ? 900 : 60 } });
+      effects.push({ code: "starts_calibration", params: { seconds: 60 } });
     }
     const previous = (bulb as unknown as Record<string, unknown>)[request.setting];
     return {

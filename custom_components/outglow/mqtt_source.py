@@ -24,8 +24,6 @@ class ObservationSink(Protocol):
 
     def availability_changed(self, ieee: str, online: bool) -> None: ...
 
-    def detector_changed(self, ieee: str) -> None: ...
-
 
 def _not_finite(token: str) -> Any:
     raise ValueError(f"{token} is not a finite number")
@@ -61,7 +59,7 @@ def _float(value: object) -> float | None:
     return float(value)
 
 
-def parse_link(item: object, cfar: bool = False) -> LinkReading | None:
+def parse_link(item: object) -> LinkReading | None:
     if not isinstance(item, Mapping):
         return None
     tx = normalise_ieee(item.get("ieee_address"))
@@ -72,17 +70,17 @@ def parse_link(item: object, cfar: bool = False) -> LinkReading | None:
         tx=tx,
         motion=item.get("motion") is True,
         signal_dbm=signal if signal not in (None, 0) else None,
-        noise_db=None if cfar else _float(item.get("noise")),
+        noise_db=_float(item.get("noise")),
         sensitivity=_int(item.get("sensitivity")),
         calibrated_sensitivity=_int(item.get("calibrated_sensitivity")),
-        raw_activity=None if cfar else _int(item.get("activity")),
+        raw_activity=_int(item.get("activity")),
     )
 
 
-def parse_links(raw: object, cfar: bool = False) -> tuple[LinkReading, ...]:
+def parse_links(raw: object) -> tuple[LinkReading, ...]:
     if not isinstance(raw, list):
         return ()
-    links = (parse_link(item, cfar) for item in raw)
+    links = (parse_link(item) for item in raw)
     return tuple(link for link in links if link is not None)
 
 
@@ -97,7 +95,7 @@ def parse_light(payload: Mapping[str, Any]) -> LightState | None:
     )
 
 
-def parse_observation(t: float, rx: str, payload: Mapping[str, Any], cfar: bool = False) -> Observation | None:
+def parse_observation(t: float, rx: str, payload: Mapping[str, Any]) -> Observation | None:
     has_links = isinstance(payload.get("motion_links"), list)
     light = parse_light(payload)
     if not has_links and light is None:
@@ -106,7 +104,7 @@ def parse_observation(t: float, rx: str, payload: Mapping[str, Any], cfar: bool 
     return Observation(
         t=t,
         rx=rx,
-        links=parse_links(payload.get("motion_links"), cfar),
+        links=parse_links(payload.get("motion_links")),
         occupancy=occupancy if isinstance(occupancy, bool) else None,
         light=light,
         source="unknown",
@@ -183,12 +181,8 @@ class MqttSource:
         if not isinstance(data, dict):
             return
         self.messages += 1
-        before = self._devices.detector(device)
         self._devices.update_state(device.ieee, data)
-        detector = self._devices.detector(device)
-        if detector != before:
-            self._sink.detector_changed(device.ieee)
-        obs = parse_observation(self._clock(), device.ieee, data, detector == "cfar")
+        obs = parse_observation(self._clock(), device.ieee, data)
         if obs is None:
             return
         for item in self.classifier.push(obs):

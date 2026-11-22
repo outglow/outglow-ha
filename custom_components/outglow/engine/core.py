@@ -290,7 +290,6 @@ class Engine:
 
     def context(self, ctx: Context) -> None:
         self._ingest.set_offline(ctx.offline)
-        self._ingest.set_cfar(ctx.cfar)
         self._house = ctx.house_empty
         for event in ctx.light_events:
             self.light(event)

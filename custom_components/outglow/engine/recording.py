@@ -88,7 +88,6 @@ def encode(record: Record, names: Mapping[str, str]) -> dict[str, Json]:
                 "persons_home": to_json(record.persons_home),
                 "house_empty": record.house_empty,
                 "offline": to_json(record.offline),
-                "cfar": to_json(record.cfar),
             }
         case Label():
             return {"t": record.t1, "type": "label", "label": to_json(record)}

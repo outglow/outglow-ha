@@ -21,14 +21,13 @@
     "Bulb": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["ieee", "name", "model", "available", "sensing", "detector", "probes", "activity_rate", "sensitivity", "auto_calibration", "light_entity", "area_id", "gate_duty_24h", "lines"],
+      "required": ["ieee", "name", "model", "available", "sensing", "probes", "activity_rate", "sensitivity", "auto_calibration", "light_entity", "area_id", "gate_duty_24h", "lines"],
       "properties": {
         "ieee": {"$ref": "common.json#/$defs/Ieee"},
         "name": {"type": "string", "description": "Zigbee2MQTT friendly name, may contain /"},
         "model": {"type": "string"},
         "available": {"type": "boolean"},
         "sensing": {"type": "boolean"},
-        "detector": {"enum": ["rule", "cfar"], "description": "The bulb's own detector; with cfar its line data is skipped"},
         "probes": {"type": ["integer", "null"], "minimum": 0, "description": "Probes per second"},
         "activity_rate": {"type": ["number", "null"], "minimum": 0, "description": "Activity reports per second while the gate is open"},
         "sensitivity": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},

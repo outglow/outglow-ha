@@ -86,8 +86,7 @@
         "type": {"const": "context"},
         "persons_home": {"type": "array", "items": {"type": "string"}},
         "house_empty": {"enum": ["yes", "soft", "no", "unknown"]},
-        "offline": {"type": "array", "items": {"$ref": "common.json#/$defs/Ieee"}},
-        "cfar": {"type": "array", "items": {"$ref": "common.json#/$defs/Ieee"}, "description": "Bulbs whose own detector is CFAR; their line data is skipped"}
+        "offline": {"type": "array", "items": {"$ref": "common.json#/$defs/Ieee"}}
       }
     },
     "Label": {

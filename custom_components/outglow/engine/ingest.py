@@ -49,7 +49,6 @@ class Ingest:
         self._rx = {b: _Rx() for b in topo.bulbs}
         self._light_t: dict[str, float] = {}
         self._offline: frozenset[str] = frozenset()
-        self._cfar: frozenset[str] = frozenset()
         self.messages = 0
 
     def inherit(self, old: Ingest) -> None:
@@ -57,14 +56,10 @@ class Ingest:
         self._rx.update({b: replace(s) for b, s in old._rx.items() if b in self._rx})
         self._light_t = dict(old._light_t)
         self._offline = old._offline
-        self._cfar = old._cfar
         self.messages = old.messages
 
     def set_offline(self, offline: frozenset[str]) -> None:
         self._offline = offline
-
-    def set_cfar(self, cfar: frozenset[str]) -> None:
-        self._cfar = cfar
 
     def light(self, ieee: str, t: float) -> None:
         self._light_t[ieee] = max(t, self._light_t.get(ieee, t))
@@ -147,7 +142,7 @@ class Ingest:
         rx, tx = d
         if d in self._topo.excluded:
             return DirSample(None, False, (*flags, "excluded"))
-        if gates[rx] == "offline" or rx in self._cfar:
+        if gates[rx] == "offline":
             return DirSample(None, False, tuple(flags))
         if t - max(self._light_t.get(rx, -math.inf), self._light_t.get(tx, -math.inf)) < BLANK_LIGHT_S:
             return DirSample(None, False, (*flags, "blanked"))

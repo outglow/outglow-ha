@@ -17,7 +17,6 @@ _LOGGER = logging.getLogger(__name__)
 IEEE = re.compile(r"^0x[0-9a-f]{16}$")
 Setting = Literal["sensing", "sensitivity", "probes", "auto_calibration", "self_tuning", "calibrate"]
 BulbValue = int | bool | str
-Detector = Literal["rule", "cfar"]
 SETTINGS: tuple[Setting, ...] = ("sensing", "sensitivity", "probes", "auto_calibration", "self_tuning", "calibrate")
 Z2M_KEYS: dict[Setting, str] = {
     "sensing": "motion_sensing",
@@ -28,7 +27,7 @@ Z2M_KEYS: dict[Setting, str] = {
     "calibrate": "motion_calibrate",
 }
 RANGES: dict[Setting, tuple[int, int]] = {"sensitivity": (0, 100), "probes": (0, 10)}
-CALIBRATION_S: dict[Detector, int] = {"rule": 60, "cfar": 900}
+CALIBRATION_S = 60
 DEFAULT_PROBES = 5
 
 
@@ -153,13 +152,6 @@ class Z2MDevices:
         except ValueError:
             return None
 
-    def detector(self, device: Device) -> Detector:
-        value = device.state.get("motion_detector")
-        return "cfar" if isinstance(value, str) and value.lower() == "cfar" else "rule"
-
-    def cfar(self) -> frozenset[str]:
-        return frozenset(d.ieee for d in self._by_ieee.values() if d.outglow and self.detector(d) == "cfar")
-
     def sensing(self, device: Device) -> bool:
         value = device.state.get("motion_sensing")
         return value is True or (isinstance(value, str) and value.upper() == "ON")
@@ -231,9 +223,7 @@ def effects(devices: Z2MDevices, device: Device, setting: Setting, value: BulbVa
                 out.append({"code": "overwrites_all_lines", "params": {"lines": lines}})
         case "calibrate":
             if value == "start":
-                out.append(
-                    {"code": "starts_calibration", "params": {"seconds": CALIBRATION_S[devices.detector(device)]}}
-                )
+                out.append({"code": "starts_calibration", "params": {"seconds": CALIBRATION_S}})
                 out.append({"code": "overwrites_all_lines", "params": {"lines": lines}})
         case "self_tuning":
             pass

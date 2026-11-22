@@ -75,7 +75,6 @@ export const ts = strings(
     sensitivity: "Sensitivity",
     probes: "Probes",
     auto_cal: "Auto-calibration",
-    detector_cfar: "Detector in the bulb: CFAR — line data skipped",
     reports: "Activity reports",
     reports_off: "off",
     rate: "{n}/s",
@@ -203,7 +202,6 @@ export const ts = strings(
     sensitivity: "Czułość",
     probes: "Sondy",
     auto_cal: "Autokalibracja",
-    detector_cfar: "Detektor w żarówce: CFAR — dane linii pominięte",
     reports: "Raporty aktywności",
     reports_off: "wyłączone",
     rate: "{n}/s",
@@ -1040,9 +1038,6 @@ export class OutglowSettingsView extends ViewBase {
         </div>
         <div><dt>${ts(loc, "gate")}</dt><dd>${fmtPercent(loc, bulb.gate_duty_24h)}</dd></div>
       </dl>
-      ${bulb.detector === "cfar"
-        ? html`<div class="notice info" data-detector="cfar">${icon(mdiInformation, 20)}<span>${ts(loc, "detector_cfar")}</span></div>`
-        : nothing}
       <div>
         <button class="btn outlined" ?disabled=${!bulb.available} data-change=${bulb.ieee} @click=${() => (this._write = { bulb, setting: "sensitivity" })}>
           ${ts(loc, "change")}

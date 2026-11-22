@@ -207,7 +207,6 @@ class Context:
     house_empty: HouseEmpty = "unknown"
     light_events: tuple[LightEvent, ...] = ()
     offline: frozenset[str] = frozenset()
-    cfar: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)

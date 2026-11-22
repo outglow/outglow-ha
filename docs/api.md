@@ -132,7 +132,6 @@ Websocket commands (architecture.md 3.7). request: the message fields besides id
 | `model` | `string` | yes |  |
 | `available` | `boolean` | yes |  |
 | `sensing` | `boolean` | yes |  |
-| `detector` | `"rule" \| "cfar"` | yes | The bulb's own detector; with cfar its line data is skipped |
 | `probes` | `number \| null` | yes | Probes per second |
 | `activity_rate` | `number \| null` | yes | Activity reports per second while the gate is open |
 | `sensitivity` | `number \| null` | yes |  |
@@ -1038,7 +1037,6 @@ One line of a JSONL recording, format 2 (architecture.md 4.4). The first line is
 | `persons_home` | `string[]` | yes |  |
 | `house_empty` | `"yes" \| "soft" \| "no" \| "unknown"` | yes |  |
 | `offline` | `Ieee[]` | yes |  |
-| `cfar` | `Ieee[]` | no | Bulbs whose own detector is CFAR; their line data is skipped |
 
 ### Label
 

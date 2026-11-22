@@ -88,7 +88,6 @@ def _v2_records() -> list[Record]:
         Observation(t=1.5, rx=A, links=(LinkReading(tx=B, window_sum=7, raw_activity=7),), source="lines"),
         LightEvent(t=2.0, ieee=A, origin="user", on=False),
         Context(t=3.0, persons_home=frozenset({"person.x"}), house_empty="no", offline=frozenset({C})),
-        Context(t=3.5, cfar=frozenset({A})),
         Label(t0=1.0, t1=4.0, kind="room", room="hall", activity="walk", source="wizard", weight=1.0),
         Frame(t=4.5, rooms={"hall": RoomFrame(p=0.5)}),
     ]

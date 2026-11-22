@@ -346,12 +346,7 @@ Per direction d = (rx ← tx):
 4. **Frozen lines.** Identical level in 8 reports while another direction of the same rx changed: `frozen`, no data.
    `signal_dbm` ≤ −88: `weak`, half weight in the priors.
 5. **Excluded directions** from the plan give no data.
-6. **A bulb with its own CFAR detector.** Firmware 1.0.6 can switch a bulb's detector to CFAR (`motion_detector` in
-   Zigbee2MQTT). Its activity and noise then mean something else, so the integration drops them and the directions
-   that bulb receives have no data: neither the host CFAR nor the model learns from them, not even as censored quiet.
-   Motion bits and signal stay. The context carries the set of such bulbs, so recordings and replays keep it. A
-   missing field keeps the rule behaviour of older firmware.
-7. **Per tick** (0.5 s by default): the maximum level of the tick; without a report the last level holds for ≤ 1 s.
+6. **Per tick** (0.5 s by default): the maximum level of the tick; without a report the last level holds for ≤ 1 s.
 
 ### 5.2 Layer 1: CFAR on the host
 
@@ -629,8 +624,7 @@ experimental.
 1. Converter: separate the `0xFF47` level from the `0x0002` window sum (removes the stream heuristic, D2).
 2. Firmware: an "always stream" mode, so the host gets an unbiased background (D3).
 3. Firmware: the number of samples behind each window, so a frozen line is a fact, not a guess.
-4. The firmware's own CFAR detector (firmware 1.0.6, `motion_detector`) exists; for now its line data are skipped
-   (5.1). Later: its decisions as an extra observation.
+4. Later: the firmware's own CFAR decisions as an extra observation.
 
 ## 14. Decisions
 

@@ -177,8 +177,6 @@ describe("bulb write dialog logic", () => {
     expect(effectText("pl", lines)).toBe("Nadpisze ustawienie wszystkich 3 linii żarówki.");
     expect(effectText("pl", { code: "clears_calibration", params: {} })).toContain("kalibrację");
     expect(effectText("en", { code: "starts_calibration", params: {} })).toContain("60 s");
-    expect(effectText("en", { code: "starts_calibration", params: { seconds: 900 } })).toContain("15 min");
-    expect(effectText("pl", { code: "starts_calibration", params: { seconds: 900 } })).toContain("15 min");
   });
 
   it("writes only with a fresh token for the same change", () => {

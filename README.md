@@ -260,13 +260,6 @@ sensitivity, probes, calibration). A write to a bulb is never automatic: a dialo
 (a new sensitivity, for example, overwrites every line of that bulb and clears its calibration) and the change goes
 through only with a fresh confirmation.
 
-**A bulb with its own CFAR detector.** Outglow firmware 1.0.6 and newer can switch a bulb's motion detector to CFAR
-(`motion_detector` in Zigbee2MQTT). Such a bulb's activity levels and noise mean something else, so the integration
-skips them: the directions that bulb receives give no data, and neither the host's CFAR nor the model learns from
-them. Its motion bits and the signal of its lines are still used, and the directions other bulbs receive from it work
-as before. Its card in Settings says *Detector in the bulb: CFAR — line data skipped*, and calibrating such a bulb
-takes about 15 minutes instead of one. Bulbs without the field (older firmware) are treated as the rule detector.
-
 <p align="center">
   <img src="docs/images/settings-desktop-dark.png" width="760" alt="The Settings tab in the dark theme with the hall's room settings.">
 </p>
