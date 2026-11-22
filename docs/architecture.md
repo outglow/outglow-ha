@@ -210,7 +210,7 @@ P ≤ 100 pairs, a few ms in CPython; budget p99 ≤ 10 ms at 9 bulbs and ≤ 50
 
 On Home Assistant's event loop, at 30 bulbs with a learnt model, a tick takes < 5 ms on average and no call on the
 loop takes > 20 ms of CPU (`tests/integration/test_loop_time.py` measures the CPU time of the loop thread per call;
-`OUTGLOW_LOOP_TIME_SCALE` multiplies both budgets on a slow or busy machine). The median, MAD and threshold of each
+`OUTGLOW_LOOP_TIME_SCALE` multiplies both budgets on a slow or busy machine, 2 by default on CI). The median, MAD and threshold of each
 direction are computed once per loaded model; the CFAR refresh every 60 s only picks thresholds for directions
 without samples from their signal class's pool. Deriving the model (pair parameters, emission tables, CFAR thresholds)
 at start, on a plan save, apply, rollback and reset runs in the executor on a copy; the engine takes the result if the

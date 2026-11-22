@@ -2,6 +2,7 @@ import base64
 import cmath
 import json
 import math
+import os
 import time
 import tracemalloc
 from dataclasses import replace
@@ -15,9 +16,11 @@ from custom_components.outglow.engine import Engine, from_json, to_json
 from custom_components.outglow.engine.defaults import HIST_BINS
 from custom_components.outglow.engine.types import ExcludedDirection, Plan, PlanBulb, Room, Settings, Wall
 from custom_components.outglow.errors import OutglowError
-from tests.integration.common import plan_json
+from tests.integration.common import plan_json, time_scale
 from tools import valetudo_synth
 from tools.valetudo_synth import Cells, compressed, rect, union
+
+SCALE = time_scale(os.environ)
 
 ROOT = Path(__file__).resolve().parents[2]
 FLAT = ROOT / "tests" / "fixtures" / "valetudo" / "flat.json"
@@ -223,7 +226,7 @@ def test_a_big_sparse_map_is_fast() -> None:
     text = json.dumps(data)
     start = time.perf_counter()
     result = plan_import.load("auto", text, {})
-    assert time.perf_counter() - start < 3.0
+    assert time.perf_counter() - start < 3.0 * SCALE
     assert len(result.plan.rooms) == 5
 
 
@@ -321,7 +324,7 @@ def test_only_a_valetudo_map_may_be_larger_than_a_plan() -> None:
         started = time.thread_time()
         with pytest.raises(OutglowError, match="too large"):
             plan_import.load(fmt, text, {})
-        assert time.thread_time() - started < 1.0
+        assert time.thread_time() - started < 1.0 * SCALE
     lists = "[" + "[]," * (plan_import.MAX_TEXT // 3 - 1) + "[]]"
     tracemalloc.start()
     with pytest.raises(OutglowError, match="too large"):
@@ -414,7 +417,7 @@ def test_the_largest_plans_let_in_build_an_engine_in_bounded_time() -> None:
         assert plan_import.engine_cost(plan).total_us <= plan_import.ENGINE_BUDGET_US
         started = time.thread_time()
         Engine(plan, Settings())
-        assert time.thread_time() - started < 1.5 * plan_import.ENGINE_BUDGET_US / 1e6, (rooms, corners, bulbs)
+        assert time.thread_time() - started < 1.5 * SCALE * plan_import.ENGINE_BUDGET_US / 1e6, (rooms, corners, bulbs)
 
 
 def learned(plan: Plan) -> dict[str, Any]:
@@ -454,7 +457,7 @@ def test_the_estimate_covers_a_learned_model_and_every_wall() -> None:
         bulbs += 1
     for shown in (plan, grid(12, 4, most_bulbs(12, 4)), partitions(grid(1, 4, bulbs), plan_import.MAX_WALLS)):
         estimate = plan_import.engine_cost(shown).total_us / 1e6
-        assert rebuild_s(shown) < 1.5 * estimate, (len(shown.rooms), len(shown.bulbs))
+        assert rebuild_s(shown) < 1.5 * SCALE * estimate, (len(shown.rooms), len(shown.bulbs))
 
 
 def test_a_plan_too_large_to_sense_names_the_limit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -495,7 +498,7 @@ def test_checking_a_large_plan_stays_quick(monkeypatch: pytest.MonkeyPatch) -> N
     warnings = plan_import._Warnings()
     started = time.thread_time()
     plan_import.check(plan, {}, warnings)
-    assert time.thread_time() - started < 1.0
+    assert time.thread_time() - started < 1.0 * SCALE
     assert not [w for w in warnings.items if w["code"] == "overlapping_rooms"]
     stacked = many(30, overlap=True)
     result = plan_import.build("outglow_plan", stacked, {})

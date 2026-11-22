@@ -1,5 +1,6 @@
 import json
-from collections.abc import Callable
+import math
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -10,6 +11,7 @@ from custom_components.outglow.coordinator import OutglowCoordinator
 from custom_components.outglow.engine.types import Label
 
 BASE = "zigbee2mqtt"
+TIME_SCALE_ENV = "OUTGLOW_LOOP_TIME_SCALE"
 T0 = 1_800_000_000.0
 BULBS = {
     "0x0000000000000001": "Test/Living 1",
@@ -178,3 +180,10 @@ async def pending_labels(hass: HomeAssistant, coordinator: OutglowCoordinator) -
     await coordinator.async_flush_history()
     labels: list[Label] = await hass.async_add_executor_job(coordinator.history.labels, 0.0, 1e12, "pending")
     return labels
+
+
+def time_scale(env: Mapping[str, str]) -> float:
+    scale = float(env.get(TIME_SCALE_ENV, "2" if env.get("CI") else "1"))
+    if not (math.isfinite(scale) and scale > 0):
+        raise ValueError(f"{TIME_SCALE_ENV} must be a positive number, not {scale}")
+    return scale

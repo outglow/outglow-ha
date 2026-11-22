@@ -127,8 +127,9 @@ One change (commit or pull request) contains at once:
   `sys.path`: the platform `select.py` would shadow the standard library's `select`.
 - **ruff** would format code blocks in Markdown; `*.md` is excluded in `pyproject.toml`.
 - **Loop time**: `tests/integration/test_loop_time.py` measures the CPU time of the event loop thread per call
-  (architecture 3.10). On a slow or busy machine `OUTGLOW_LOOP_TIME_SCALE=2` doubles its budgets; the defaults are
-  the budget for users' hardware.
+  (architecture 3.10). On a slow or busy machine `OUTGLOW_LOOP_TIME_SCALE=2` doubles its budgets, and those of the
+  CPU-time checks of the plan import and the engine cost estimate (`tests/integration/test_valetudo.py`); with `CI`
+  set (GitHub Actions) the default is 2, otherwise 1, the budget for users' hardware.
 - **Node**: versions are pinned exactly; `npm ci` from the lockfile. The Playwright tests use Chrome by default
   (`PW_CHANNEL=chromium` in the Docker image) and WebKit for the focus tests; `PW_PORT` changes the demo server's port.
 

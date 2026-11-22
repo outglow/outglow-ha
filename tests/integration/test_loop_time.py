@@ -1,7 +1,6 @@
 import asyncio
 import copy
 import gc
-import math
 import os
 import random
 import statistics
@@ -23,28 +22,27 @@ from custom_components.outglow.engine.defaults import CFAR_REFRESH_S, HIST_BINS
 from custom_components.outglow.engine.model import Hist, RoomCal
 from custom_components.outglow.engine.types import LinkReading, Observation
 from custom_components.outglow.store import MODEL_KEY, SNAPSHOTS_KEY
-from tests.integration.common import Clock, bridge, plan_json, setup_outglow, with_plan
+from tests.integration.common import TIME_SCALE_ENV, Clock, bridge, plan_json, setup_outglow, time_scale, with_plan
 from tests.integration.test_websocket import Client
 
 BULB_COUNT = 30
 LOOP_BUDGET_MS = 20.0
 TICK_BUDGET_MS = 5.0
-SCALE_ENV = "OUTGLOW_LOOP_TIME_SCALE"
 
 
 def _budgets(env: Mapping[str, str]) -> tuple[float, float]:
-    scale = float(env.get(SCALE_ENV, "1"))
-    if not (math.isfinite(scale) and scale > 0):
-        raise ValueError(f"{SCALE_ENV} must be a positive number, not {scale}")
+    scale = time_scale(env)
     return LOOP_BUDGET_MS * scale, TICK_BUDGET_MS * scale
 
 
 def test_the_budgets_scale_for_slow_machines() -> None:
     assert _budgets({}) == (LOOP_BUDGET_MS, TICK_BUDGET_MS)
-    assert _budgets({SCALE_ENV: "2.5"}) == (50.0, 12.5)
+    assert _budgets({TIME_SCALE_ENV: "2.5"}) == (50.0, 12.5)
+    assert _budgets({"CI": "true"}) == (40.0, 10.0)
+    assert _budgets({"CI": "true", TIME_SCALE_ENV: "1"}) == (LOOP_BUDGET_MS, TICK_BUDGET_MS)
     for bad in ("0", "-1", "nan", "inf"):
-        with pytest.raises(ValueError, match=SCALE_ENV):
-            _budgets({SCALE_ENV: bad})
+        with pytest.raises(ValueError, match=TIME_SCALE_ENV):
+            _budgets({TIME_SCALE_ENV: bad})
 
 
 def _plan(rooms: int) -> dict[str, Any]:
