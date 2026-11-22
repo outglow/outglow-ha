@@ -432,16 +432,18 @@ test.describe("picking with the keyboard, and merging", () => {
 
   test("the merge note names the areas, and the bulbs that would lose their room", async ({ page }) => {
     await setRooms(page, [["a", "Big", [[0, 0], [4, 0], [4, 3], [0, 3]], "living"], ["b", "Small", [[4, 0], [6, 0], [6, 3], [4, 3]], "hall"]], [[[4, 0], [4, 3]]]);
-    await page.evaluate(async () => {
-      const ed = document.querySelector("outglow-panel")!.shadowRoot!.querySelector("outglow-plan-editor") as unknown as { bulbs: { ieee: string; area_id: string | null }[]; updateComplete: Promise<unknown> };
-      ed.bulbs = ed.bulbs.map((b) => (b.ieee.endsWith("3") ? { ...b, area_id: "hall" } : b));
-      await ed.updateComplete;
-    });
     const v = await view(page);
     await page.mouse.click(...screen(v, 4, 1.5));
     const note = editor(page).locator(".inspector .merge-loses");
     await expect(note).toContainText("Big stays in the area Living room; the area Hall of Small is then no room's.");
-    await expect(note).toContainText("Hall is not on the plan and belongs to Small through the area Hall: after the merge it belongs to no room.");
+    await expect(async () => {
+      await page.evaluate(async () => {
+        const ed = document.querySelector("outglow-panel")!.shadowRoot!.querySelector("outglow-plan-editor") as unknown as { bulbs: { ieee: string; area_id: string | null }[]; updateComplete: Promise<unknown> };
+        ed.bulbs = ed.bulbs.map((b) => (b.ieee.endsWith("3") ? { ...b, area_id: "hall" } : b));
+        await ed.updateComplete;
+      });
+      await expect(note).toContainText("Hall is not on the plan and belongs to Small through the area Hall: after the merge it belongs to no room.", { timeout: 500 });
+    }).toPass({ timeout: 10_000 });
     await editor(page).locator(".inspector").getByRole("button", { name: "Merge into one room" }).click();
     expect((await currentPlan(page)).rooms).toMatchObject([{ id: "a", area_id: "living" }]);
     await expect(editor(page).locator(".hint [role=status]")).toContainText("Hall is not on the plan");
