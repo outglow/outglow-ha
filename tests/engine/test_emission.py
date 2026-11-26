@@ -82,6 +82,14 @@ def test_probabilities_and_information() -> None:
     assert information(p, "living") > information(p, "office") > 0
 
 
+def test_two_rooms_disturb_a_pair_as_the_stronger_one_does() -> None:
+    p = params(TOPO, Model(), lambda pair: False)[(B1, B3)]
+    weak, strong = sorted(("living", "office"), key=p.theta.__getitem__)
+    assert p.theta[strong] > p.theta[weak] > 0
+    assert probabilities(p, frozenset({strong, weak})) == probabilities(p, frozenset({strong}))
+    assert probabilities(p, frozenset({strong, weak})) != probabilities(p, frozenset({weak}))
+
+
 def test_emission_loglik_cache_and_contribution() -> None:
     states = states_of(TOPO.rooms)
     em = Emission(TOPO, params(TOPO, Model(), lambda pair: False), states)

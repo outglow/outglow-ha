@@ -3,6 +3,7 @@ from dataclasses import dataclass, replace
 
 from .defaults import (
     A_OFF,
+    EXTRA_ROOM_PRIOR,
     N_ON,
     NEIGH_WINDOW_S,
     P_ENTER_BASE,
@@ -40,7 +41,7 @@ def state_prior(q: dict[str, float], states: tuple[State, ...]) -> list[float]:
         value = 1.0
         for room, qr in q.items():
             value *= qr if room in s else 1 - qr
-        out.append(value)
+        out.append(value * EXTRA_ROOM_PRIOR ** max(0, len(s) - 1))
     total = sum(out)
     return [v / total for v in out]
 

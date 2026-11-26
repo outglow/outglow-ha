@@ -109,10 +109,8 @@ def params(
 
 
 def probabilities(p: PairParams, state: State, binary: bool = False) -> tuple[float, ...]:
-    keep = 1 - p.beta
-    for room in state:
-        keep *= 1 - p.theta[room]
-    a = 1 - keep
+    reach = max((p.theta[room] for room in state), default=0.0)
+    a = 1 - (1 - p.beta) * (1 - reach)
     if binary:
         hit = a + (1 - a) * (p.eps1 + p.eps2)
         p0 = 1 - hit

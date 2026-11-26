@@ -1,5 +1,6 @@
 import math
 
+from engine.defaults import EXTRA_ROOM_PRIOR
 from engine.emission import states_of
 from engine.rooms import Rooms, posterior, state_prior
 from engine.topology import build
@@ -21,6 +22,15 @@ def test_state_prior_and_posterior() -> None:
     assert math.isclose(sum(prior), 1.0)
     p = posterior(prior, [0.0, 3.0, 0.0, 3.0], states, ("a", "b"))
     assert p["a"] > 0.9 > p["b"]
+
+
+def test_each_extra_room_costs_prior() -> None:
+    states = states_of(("a", "b", "c"))
+    prior = dict(zip(states, state_prior({"a": 0.5, "b": 0.5, "c": 0.5}, states), strict=True))
+    one = prior[frozenset({"a"})]
+    assert math.isclose(prior[frozenset()], one)
+    assert math.isclose(prior[frozenset({"a", "b"})], EXTRA_ROOM_PRIOR * one)
+    assert math.isclose(prior[frozenset({"a", "b", "c"})], EXTRA_ROOM_PRIOR**2 * one)
 
 
 def test_enter_depends_on_neighbours_and_entrance() -> None:

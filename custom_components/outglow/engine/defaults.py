@@ -55,6 +55,7 @@ WEAK_FACTOR = 0.5
 HARD_WALL_FACTOR = 1.2
 
 K_MAX = 3
+EXTRA_ROOM_PRIOR = 0.3
 
 P_STAY: dict[Reaction, float] = {"fast": 0.80, "normal": 0.90, "calm": 0.95}
 N_ON: dict[Reaction, int] = {"fast": 1, "normal": 2, "calm": 4}
