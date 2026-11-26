@@ -159,8 +159,13 @@ class Learner:
             count = 0
             for rec in records:
                 model.decay(rec.t)
-                others = [p for r, p in zip(rooms, rec.p, strict=True) if r != label.room]
-                count += self._pair_counts(model, rec, weight * (1 - max(others, default=0.0)), None, skip)
+                count += self._pair_counts(model, rec, weight * _elsewhere(rooms, rec, label.room), None, skip)
+        elif label.source == "manual_light":
+            assert label.room is not None
+            count = 0
+            for rec in records:
+                model.decay(rec.t)
+                count += self._pair_counts(model, rec, label.weight * _elsewhere(rooms, rec, label.room), label.room)
         else:
             assert label.room is not None
             index = rooms.index(label.room)
@@ -174,6 +179,10 @@ class Learner:
         if count:
             model.labels[label.source] = model.labels.get(label.source, 0) + count
         return count
+
+
+def _elsewhere(rooms: Sequence[str], rec: TickRecord, room: str) -> float:
+    return 1 - max((p for r, p in zip(rooms, rec.p, strict=True) if r != room), default=0.0)
 
 
 def _picker[K](old: Sequence[K], new: Sequence[K]) -> Callable[[Sequence[Any]], tuple[Any, ...]]:

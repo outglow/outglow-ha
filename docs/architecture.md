@@ -16,7 +16,7 @@ living room does not light up the hall), and learning from labels and correction
 
 The pipeline in one line: `motion_links` → normalisation (gate, blanking after light changes, frozen lines) →
 **CFAR on the host** per direction (threshold from the distribution of quiet, learnt while the home is empty) →
-pair observation {quiet, one-sided, two-sided} → **common veto** → **factorial room model with noisy-OR emission**
+pair observation {quiet, one-sided, two-sided} → **common veto** → **factorial room model with strongest-room emission**
 (explaining away) → per-room temporal filter with adjacency and hysteresis → a `binary_sensor` per room. Emission
 parameters start from the plan's geometry and from radio physics, then learn from the wizard, empty-home periods and
 corrections.
@@ -329,7 +329,7 @@ becomes labels. `outglow.export_recording` writes format 2.
 | One HMM over rooms | Rejected | Two people in two rooms break it |
 | Hand-written zone rules | Baseline B1 and the `rules` mode | Work, but are hand-made and do not transfer between homes |
 | Deep learning on the line vector | Rejected | Minutes of labels; would not transfer |
-| **CFAR per direction + three-state pair observation + veto + factorial noisy-OR room model + temporal filter + counting with priors** | **Chosen** | Few parameters per room, priors from geometry and physics, learns from few labels, explains away paths through walls, interpretable (the panel shows which pairs decided) |
+| **CFAR per direction + three-state pair observation + veto + factorial strongest-room model + temporal filter + counting with priors** | **Chosen** | Few parameters per room, priors from geometry and physics, learns from few labels, explains away paths through walls, interpretable (the panel shows which pairs decided) |
 
 ### 5.1 Layer 0: intake and normalisation
 
@@ -381,15 +381,21 @@ learnt separately. A chronically one-sided direction (≥ 3× the reverse and �
 
 ### 5.5 Layer 4: pair emission and priors from the plan
 
-The state of a tick is the set S of rooms with moving people. Emission of pair p (noisy-OR with a leak):
+The state of a tick is the set S of rooms with moving people. Emission of pair p (the strongest room of S, with a leak):
 
 ```
-a_p(S) = 1 − (1 − β_p) · Π_{r ∈ S} (1 − θ_{p,r})       # probability the pair is disturbed
+a_p(S) = 1 − (1 − β_p) · (1 − max_{r ∈ S} θ_{p,r})     # probability the pair is disturbed
 P(o=2 | S) = a_p(S)·η_p        + (1 − a_p(S))·ε2_p
 P(o=1 | S) = a_p(S)·(1 − η_p)  + (1 − a_p(S))·ε1_p
 P(o=0 | S) = 1 − P(o=1|S) − P(o=2|S)
 o = null → factor 1;  o = 0 with both gates closed → c·P(0|S) + (1 − c), c = 0.7
 ```
+
+A second room does not add to a pair that the first already disturbs. With a noisy-OR over the rooms it did, and
+because pairs light up in bursts rather than independently, one person walking through a room lit more pairs than
+one room predicted and the model added the room next door: in the owner's home two rooms showed motion in about
+80 % of the ticks of a labelled walk in one room. The cost is that two people in rooms seen by the same pairs are
+more often shown as one room.
 
 `θ_{p,r}` is the pair's sensitivity to motion in room r, `η_p` the share of two-sided disturbances, `ε1_p`, `ε2_p` the
 one- and two-sided rates in quiet, `β_p` a leak (neighbours behind a wall). All have Beta/Dirichlet priors with
@@ -410,7 +416,8 @@ information).
 ### 5.6 Layer 5: inference over rooms (explaining away)
 
 States are all sets S of at most 3 rooms (12 rooms: 299 states). The prior per tick comes from the temporal filter
-(rooms independent, truncated to |S| ≤ 3 and normalised, Boyen–Koller). The posterior `P(S | o) ∝ π(S) · Π_p P(o_p | S)`
+(rooms independent, each room after the first costing a factor `EXTRA_ROOM_PRIOR` = 0.3, truncated to |S| ≤ 3 and
+normalised, Boyen–Koller). The posterior `P(S | o) ∝ π(S) · Π_p P(o_p | S)`
 is computed in logs, and `p_r` is its marginal. Example: a pair from the hall into the living room lights up together
 with pairs inside the living room. {living} explains all of them; {living, hall} only adds the cost of entering the
 hall, so the hall stays dark. When the pairs inside the hall light up too, the hall wins.
@@ -467,7 +474,7 @@ Collected in `engine/defaults.py`. They are a starting point; the evaluation may
 | Wizard: sit in X | S = ∅ only for pairs far from X (not touching X or its neighbours), `still` | 0.5 |
 | Wizard: empty / empty home | S = ∅ in every room | 1.0 |
 | `outglow.label` | as given | 0.8 |
-| A manual switch-on while unoccupied | r ∈ S around that time | 0.3 |
+| A manual switch-on while unoccupied | r ∈ S around that time, one label per room and window, each tick weighted by 1 − the highest p of another room | 0.3 |
 | `outglow.feedback`, corrections in History | by kind | 0.7 |
 | Soft empty home | CFAR background only | 0.3 |
 

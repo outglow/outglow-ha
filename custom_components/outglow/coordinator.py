@@ -134,6 +134,7 @@ class OutglowCoordinator:
         self._loaded = False
         self._bridge_up: bool | None = None
         self._bridge_up_at = -math.inf
+        self._manual_label_at: dict[str, float] = {}
         self.panel_registered = False
         self.panel_conflict = False
         self.last_quality: QualityReport | None = None
@@ -445,7 +446,9 @@ class OutglowCoordinator:
         settling = event.t - max(self._bridge_up_at, self.started) < BRIDGE_SETTLE_S
         if event.on and event.origin in ("user", "remote") and room is not None and frame is not None and not settling:
             rf = frame.rooms.get(room)
-            if rf is not None and not rf.occupied:
+            recent = event.t - self._manual_label_at.get(room, -math.inf) < MANUAL_LIGHT_BEFORE_S + MANUAL_LIGHT_AFTER_S
+            if rf is not None and not rf.occupied and not recent:
+                self._manual_label_at[room] = event.t
                 label = Label(
                     t0=event.t - MANUAL_LIGHT_BEFORE_S,
                     t1=event.t + MANUAL_LIGHT_AFTER_S,

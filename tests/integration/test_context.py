@@ -7,7 +7,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.typing import MqttMockHAClient
 
-from custom_components.outglow.const import BRIDGE_SETTLE_S
+from custom_components.outglow.const import BRIDGE_SETTLE_S, MANUAL_LIGHT_AFTER_S, MANUAL_LIGHT_BEFORE_S
 from custom_components.outglow.context import HouseState, light_origin
 from custom_components.outglow.coordinator import OutglowCoordinator
 from custom_components.outglow.engine.types import Frame, LightEvent, RoomFrame
@@ -90,6 +90,30 @@ async def test_manual_light_on_in_an_empty_room_is_a_correction(
     hass.states.async_set(LIGHT, "on")
     await hass.async_block_till_done()
     assert len(await pending_labels(hass, coordinator)) == 1
+
+
+async def test_one_switch_of_several_bulbs_is_one_correction(
+    hass: HomeAssistant, mqtt_mock: MqttMockHAClient, clock: Clock
+) -> None:
+    await _with_light(hass)
+    _entry, coordinator = await setup_outglow(hass)
+    await bridge(hass)
+    await with_plan(hass, coordinator)
+    clock.advance(BRIDGE_SETTLE_S)
+    coordinator.set_frame(Frame(t=clock(), rooms={"living": RoomFrame(occupied=False, coverage="good")}))
+
+    async def switch() -> int:
+        hass.states.async_set(LIGHT, "off")
+        await hass.async_block_till_done()
+        hass.states.async_set(LIGHT, "on", context=Context(user_id="someone"))
+        await hass.async_block_till_done()
+        return len(await pending_labels(hass, coordinator))
+
+    assert await switch() == 1
+    clock.advance(MANUAL_LIGHT_BEFORE_S + MANUAL_LIGHT_AFTER_S - 1)
+    assert await switch() == 1
+    clock.advance(MANUAL_LIGHT_BEFORE_S + MANUAL_LIGHT_AFTER_S)
+    assert await switch() == 2
 
 
 async def test_lights_coming_back_are_not_corrections(

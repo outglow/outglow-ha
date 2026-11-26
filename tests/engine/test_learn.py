@@ -65,6 +65,21 @@ def test_room_walk_teaches_emission_and_entries() -> None:
     assert model.entries["hall"] == [0.4]
 
 
+def test_a_manual_light_teaches_less_while_another_room_moves() -> None:
+    light = Label(t0=10.0, t1=30.0, kind="room", room="hall", activity="any", source="manual_light", weight=0.4)
+    learner = _learner([_record(10 + 0.5 * i, 8, QUIET, 2, (0.75, 0.9, 0.0)) for i in range(40)])
+    model = Model()
+    assert learner.label(model, light) == 29
+    assert model.emit[(TOPO.pairs[0], "hall")] == [0.0, 0.0, pytest.approx(29 * 0.1)]
+    assert model.entries == {}
+    assert model.labels == {"manual_light": 29}
+    elsewhere = _learner([_record(10 + 0.5 * i, 8, QUIET, 2, (0.0, 0.0, 1.0)) for i in range(40)])
+    untouched = Model()
+    assert elsewhere.label(untouched, light) == 0
+    assert untouched.emit == {}
+    assert untouched.labels == {}
+
+
 def test_partial_knowledge_and_ignored_labels() -> None:
     records = [_record(10 + 0.5 * i, 8, QUIET, 1, (0.5, 0.25, 0.0)) for i in range(40)]
     learner = _learner(records)
