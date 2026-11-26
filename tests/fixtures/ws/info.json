@@ -2,7 +2,7 @@
   "command": "outglow/info",
   "request": {},
   "response": {
-    "version": "0.1.1",
+    "version": "0.1.2",
     "entry_id": "01JOUTGLOWMOCKENTRY0000000",
     "status": "learning",
     "base_topic": "zigbee2mqtt",

@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Final
 
 DOMAIN: Final = "outglow"
-VERSION: Final = "0.1.1"
+VERSION: Final = "0.1.2"
 
 CONF_BASE_TOPIC: Final = "base_topic"
 CONF_LOG_LEVEL: Final = "log_level"
